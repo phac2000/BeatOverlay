@@ -6,20 +6,20 @@
 
 **Beat Overlay** is a feature-rich, highly customizable Android application that draws a floating rhythm bar over other apps and games. Designed for rhythm training, tempo practice, and gaming overlays, it provides real-time visual beat tracking, tempo progression, random pauses, slow rests, and haptic feedback.
 
----
+----
 
-## ✨ Features
+## Features
 
-- 🎵 **Floating Overlay Track**: Draws a sleek rhythm bar over any app with customizable width, thickness, opacity, edge fading, and vertical position.
-- ⚡ **Dynamic Tempo Ramping**: Set a starting BPM, continuous speed-up rate (% per minute), and maximum cap.
-- ⏸️ **Random Pauses & Restart Countdown**: Introduces random freeze intervals with configurable countdown timers before resuming.
-- 🧘 **Slow Rest Phases**: Configurable low-tempo rest periods that can trigger randomly or follow a pause.
-- 🎲 **Random Tempo Drift (Chaos)**: Simulates natural rhythm variation with time-based tempo fluctuations.
-- 📳 **Haptic Feedback**: Tactile vibration ticks on every beat and navigation button with adjustable strength and duration.
-- 🎨 **Custom Beat Markers**: Customize the scrolling marker with standard shapes or your own custom PNG, JPG, WebP, or SVG images (including the built-in Beat Overlay logo).
-- 👆 **Overlay Gestures**: Configure hold, double-tap, triple-tap, and swipe gestures directly on the floating bar.
-- 💾 **Presets & Backup**: Built-in rhythm presets, custom user presets, and complete JSON export/import support.
-- 🌗 **Modern UI & Themes**: Clean Material-inspired design with System, Light, and Dark mode support and reduced motion options.
+- **Floating Overlay Track**: Draws a sleek rhythm bar over any app with customizable width, thickness, opacity, edge fading, and vertical position.
+- **Dynamic Tempo Ramping**: Set a starting BPM, continuous speed-up rate (% per minute), and maximum cap.
+- **Random Pauses & Restart Countdown**: Introduces random freeze intervals with configurable countdown timers before resuming.
+- **Slow Rest Phases**: Configurable low-tempo rest periods that can trigger randomly or follow a pause.
+- **Random Tempo Drift (Chaos)**: Simulates natural rhythm variation with time-based tempo fluctuations.
+- **Haptic Feedback**: Tactile vibration ticks on every beat and navigation button with adjustable strength and duration.
+- **Custom Beat Markers**: Customize the scrolling marker with standard shapes or your own custom PNG, JPG, WebP, or SVG images (including the built-in Beat Overlay logo).
+- **Overlay Gestures**: Configure hold, double-tap, triple-tap, and swipe gestures directly on the floating bar.
+- **Presets & Backup**: Built-in rhythm presets, custom user presets, and complete JSON export/import support.
+- **Modern UI & Themes**: Clean Material-inspired design with System, Light, and Dark mode support and reduced motion options.
 
 ---
 
