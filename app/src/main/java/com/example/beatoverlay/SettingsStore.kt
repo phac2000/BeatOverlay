@@ -59,14 +59,60 @@ class SettingsStore(private val ctx: Context) {
         prefs.edit().putBoolean(k, v).apply()
     }
 
+    /**
+     * While true (the Home screen), edits to rhythm settings are only kept in memory until applyPending().
+     * The saved values (what the overlay uses) are the "applied" ones.
+     */
+    var staging = false
+
+    /** Called when a staged edit happens, so the Apply button can update. */
+    var onPendingChange: (() -> Unit)? = null
+
     fun setInt(k: String, v: Int) {
+        if (staging && k in PRESET_INTS) {
+            values[k] = v
+            onPendingChange?.invoke()
+            return
+        }
         putInt(k, v)
         onChange?.invoke()
     }
 
     fun setBool(k: String, v: Boolean) {
+        if (staging && k in PRESET_BOOLS) {
+            flags[k] = v
+            onPendingChange?.invoke()
+            return
+        }
         putBool(k, v)
         onChange?.invoke()
+    }
+
+    // ------------------------------------------------------------ staged edits
+
+    fun appliedInt(k: String): Int = prefs.getInt(k, INT_DEFAULTS.getValue(k))
+    fun appliedBool(k: String): Boolean = prefs.getBoolean(k, BOOL_DEFAULTS.getValue(k))
+
+    /** True when any rhythm setting differs from what is applied. Changing a value back counts as no change. */
+    fun hasPending(): Boolean {
+        for (k in PRESET_INTS) if (int(k) != appliedInt(k)) return true
+        for (k in PRESET_BOOLS) if (bool(k) != appliedBool(k)) return true
+        return false
+    }
+
+    /** Saves the staged values and tells a running overlay about them. */
+    fun applyPending() {
+        val e = prefs.edit()
+        PRESET_INTS.forEach { e.putInt(it, int(it)) }
+        PRESET_BOOLS.forEach { e.putBoolean(it, bool(it)) }
+        e.apply()
+        onChange?.invoke()
+    }
+
+    /** Throws the staged values away and goes back to the applied ones. */
+    fun discardPending() {
+        PRESET_INTS.forEach { values[it] = appliedInt(it) }
+        PRESET_BOOLS.forEach { flags[it] = appliedBool(it) }
     }
 
     // ------------------------------------------------------------ presets

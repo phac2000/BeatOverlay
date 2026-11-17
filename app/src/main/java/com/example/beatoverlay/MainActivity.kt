@@ -10,17 +10,17 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
-import androidx.core.graphics.drawable.toDrawable
-import androidx.core.net.toUri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
-import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.DecelerateInterpolator
@@ -30,18 +30,29 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
+import androidx.core.view.ViewCompat
 import java.io.File
 
 private const val SCREEN_HOME = 0
 private const val SCREEN_PRESETS = 1
 private const val SCREEN_SETTINGS = 2
+private const val SCREEN_SETUP = 3
+
+// First-time setup steps (the notification step is skipped before Android 13)
+private const val STEP_WELCOME = 0
+private const val STEP_OVERLAY = 1
+private const val STEP_NOTIF = 2
+private const val STEP_SIZE = 3
+private const val STEP_GESTURES = 4
+
+private const val REQ_NOTIF = 1
 
 private const val REQ_EXPORT = 100
 private const val REQ_IMPORT = 101
 private const val REQ_IMAGE = 102
 
 // The Stop button next to the floating bar: its width, and the gap between the two.
-private const val STOP_W_DP = 72
+private const val STOP_W_DP = 64
 private const val STOP_GAP_DP = 8
 
 /**
@@ -57,6 +68,7 @@ class MainActivity : Activity() {
     private lateinit var ui: Ui
 
     private var screen = SCREEN_HOME
+    private var setupStep = 0
     private var insetTop = 0
     private var insetBottom = 0
 
@@ -64,6 +76,8 @@ class MainActivity : Activity() {
     private lateinit var page: LinearLayout
     private lateinit var navBar: LinearLayout
     private lateinit var navHolder: FrameLayout
+    private var applyPending = false          // what the Apply item in the bar currently shows
+    private var applyItem: View? = null        // the Apply item (Home only), kept for its animation
     private lateinit var stopBtn: View
     private var stopShown = false              // what the Stop button currently shows
     private var stopFade: ObjectAnimator? = null
@@ -83,20 +97,26 @@ class MainActivity : Activity() {
             handler.removeCallbacks(syncRunnable)
             handler.postDelayed(syncRunnable, 350)
         }
-        screen = savedInstanceState?.getInt("screen") ?: SCREEN_HOME
+        store.onPendingChange = { updateApplyButton() }
+        // The very first time the app opens, start with the setup screens.
+        screen = savedInstanceState?.getInt("screen")
+            ?: if (store.bool(K_SETUP_DONE)) SCREEN_HOME else SCREEN_SETUP
+        setupStep = savedInstanceState?.getInt("setupStep") ?: 0
         render(false)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putInt("screen", screen)
+        outState.putInt("setupStep", setupStep)
     }
 
     override fun onResume() {
         super.onResume()
         OverlayService.listener = { fillNav() }
         // The overlay saves its position when it is dragged; show the new value if it changed.
-        if (store.syncPosition()) render(true)
+        // The setup screens show live permission status, so rebuild them when coming back from Android's settings.
+        if (store.syncPosition() || screen == SCREEN_SETUP) render(true)
         fillNav()
     }
 
@@ -110,9 +130,20 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
-    @Suppress("OVERRIDE_DEPRECATION")
     override fun onBackPressed() {
-        if (screen != SCREEN_HOME) go(SCREEN_HOME) else super.onBackPressed()
+        when {
+            screen == SCREEN_SETUP -> {
+                if (setupStep > 0) {
+                    setupStep--
+                    render(false)
+                } else {
+                    super.onBackPressed()
+                }
+            }
+            screen != SCREEN_HOME -> go(SCREEN_HOME)
+            store.hasPending() -> confirmLeaveHome { finish() }
+            else -> super.onBackPressed()
+        }
     }
 
     // ---------------------------------------------------------------- frame
@@ -127,11 +158,18 @@ class MainActivity : Activity() {
     }
 
     private fun applySystemBars() {
-        window.statusBarColor = p.bg
-        window.navigationBarColor = p.bg
-        window.setBackgroundDrawable(p.bg.toDrawable())
-        val light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-        val flags = window.decorView.systemUiVisibility
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        window.setBackgroundDrawable(ColorDrawable(p.bg))
+        val light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+                (if (Build.VERSION.SDK_INT >= 26) View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0)
+        val layoutFlags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        val flags = window.decorView.systemUiVisibility or layoutFlags
         window.decorView.systemUiVisibility = if (p.isDark) flags and light.inv() else flags or light
     }
 
@@ -139,6 +177,7 @@ class MainActivity : Activity() {
     private fun render(keepScroll: Boolean) {
         val keepY = if (keepScroll && ::scroll.isInitialized) scroll.scrollY else 0
 
+        store.staging = screen == SCREEN_HOME      // Home edits wait for the Apply button
         p = currentPalette()
         ui = Ui(this, p, store)
         applySystemBars()
@@ -151,6 +190,7 @@ class MainActivity : Activity() {
         page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll = ScrollView(this).apply {
             clipToPadding = false
+            clipChildren = false
             isFocusable = true
             isFocusableInTouchMode = true
             addView(page)
@@ -162,7 +202,6 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             background = ui.rounded(p.navBg, 36)
             elevation = dp(8).toFloat()
-            outlineProvider = ViewOutlineProvider.BACKGROUND
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
         // The bar and the Stop button live in one holder. The bar sits at the left, Stop at the right
@@ -174,25 +213,34 @@ class MainActivity : Activity() {
         }
         navHolder.addView(
             stopBtn,
-            FrameLayout.LayoutParams(dp(STOP_W_DP), FrameLayout.LayoutParams.MATCH_PARENT, Gravity.END)
+            FrameLayout.LayoutParams(dp(STOP_W_DP), FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.RIGHT)
         )
         navHolder.addView(
             navBar,
-            FrameLayout.LayoutParams(navBarWidth(), FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.START)
+            FrameLayout.LayoutParams(navBarWidth(), FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.LEFT)
         )
+        val groupWidth = navBarWidth() + dp(STOP_W_DP + STOP_GAP_DP)
         root.addView(
             navHolder,
-            FrameLayout.LayoutParams(
-                navBarWidth() + dp(STOP_W_DP + STOP_GAP_DP),
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            )
+            FrameLayout.LayoutParams(groupWidth, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL)
         )
+        // Stop must be exactly as tall as the bar. (A FrameLayout only re-measures a "match parent" child
+        // when it has two or more of them, so a single one would stay at its content height.)
+        navBar.addOnLayoutChangeListener { _, _, top, _, bottom, _, _, _, _ ->
+            val h = bottom - top
+            val lp = stopBtn.layoutParams
+            if (h > 0 && lp.height != h) {
+                lp.height = h
+                stopBtn.layoutParams = lp
+            }
+        }
+        navHolder.visibility = if (screen == SCREEN_SETUP) View.GONE else View.VISIBLE
         setStopInstant(OverlayService.running)
 
         when (screen) {
             SCREEN_HOME -> buildHome()
             SCREEN_PRESETS -> buildPresets()
+            SCREEN_SETUP -> buildSetup()
             else -> buildSettings()
         }
         fillNav()
@@ -215,14 +263,61 @@ class MainActivity : Activity() {
     }
 
     private fun applyInsets() {
-        page.setPadding(dp(12), insetTop + dp(8), dp(12), insetBottom + dp(128))
+        page.setPadding(dp(12), insetTop + dp(8), dp(12), insetBottom + dp(if (screen == SCREEN_SETUP) 24 else 128))
         (navHolder.layoutParams as FrameLayout.LayoutParams).bottomMargin = insetBottom + dp(16)
         navHolder.requestLayout()
     }
 
+    /** Changes screen. Leaving Home with edits that were not applied asks what to do with them first. */
     private fun go(target: Int) {
+        if (screen == SCREEN_HOME && target != SCREEN_HOME && store.hasPending()) {
+            confirmLeaveHome { goNow(target) }
+        } else {
+            goNow(target)
+        }
+    }
+
+    private fun goNow(target: Int) {
         screen = target
         render(false)
+    }
+
+    private fun confirmLeaveHome(then: () -> Unit) {
+        AlertDialog.Builder(this, dialogStyle())
+            .setTitle("Apply your changes?")
+            .setMessage("You changed some Home settings but did not apply them.")
+            .setPositiveButton("Apply") { _, _ ->
+                store.applyPending()
+                then()
+            }
+            .setNegativeButton("Discard") { _, _ ->
+                store.discardPending()
+                then()
+            }
+            .setNeutralButton("Keep editing", null)
+            .show()
+    }
+
+    /** The Apply item in the bar looks different when changes are waiting, so rebuild the bar when that flips. */
+    private fun updateApplyButton() {
+        if (store.hasPending() == applyPending) return
+        fillNav()
+    }
+
+    private fun onApplyClicked() {
+        currentFocus?.clearFocus()   // commits a number that is still being typed
+        if (!store.hasPending()) return
+        store.applyPending()
+        toast(if (OverlayService.running) "Applied to the overlay" else "Applied")
+        val item = applyItem
+        if (item == null || store.bool(K_REDUCED)) {
+            updateApplyButton()
+        } else {
+            // From here on nothing is waiting. The animation fades the item to its grey look, then the bar is rebuilt.
+            // If a setting is edited meanwhile, updateApplyButton() rebuilds the bar straight away.
+            applyPending = false
+            ui.playApplied(item) { fillNav() }
+        }
     }
 
     // ---------------------------------------------------------------- floating bar
@@ -232,12 +327,13 @@ class MainActivity : Activity() {
      * arrives in a later step, so nothing needs to resize when it appears.
      */
     private fun navBarWidth() =
-        minOf(resources.displayMetrics.widthPixels - dp(24) - dp(STOP_W_DP + STOP_GAP_DP), dp(480))
+        minOf(resources.displayMetrics.widthPixels - dp(32) - dp(STOP_W_DP + STOP_GAP_DP), dp(440))
 
     private fun fillNav() {
         if (!::navBar.isInitialized) return
         val running = OverlayService.running
         val paused = OverlayService.paused
+        applyPending = store.hasPending()
         navBar.removeAllViews()
         navBar.addView(
             ui.navItem(R.drawable.ic_home, "Home", screen == SCREEN_HOME, true) { go(SCREEN_HOME) },
@@ -251,6 +347,18 @@ class MainActivity : Activity() {
             ui.navItem(R.drawable.ic_settings, "Settings", screen == SCREEN_SETTINGS, true) { go(SCREEN_SETTINGS) },
             ui.lp(0, -2, 1f)
         )
+        // Apply (Home only): grey and not pressable until a Home setting has changed.
+        applyItem = null
+        if (screen == SCREEN_HOME) {
+            val apply = ui.navItem(
+                R.drawable.ic_check, "Apply", false, applyPending,
+                strong = applyPending, badge = applyPending, firmTick = true
+            ) { onApplyClicked() }
+            applyItem = apply
+            apply.contentDescription = if (applyPending) "Apply changes" else "Apply changes, nothing to apply"
+            ViewCompat.setStateDescription(apply, if (applyPending) "Changes waiting" else "Nothing to apply")
+            navBar.addView(apply, ui.lp(0, -2, 1f))
+        }
         // One button for three jobs: Start when stopped, Pause while running, Resume while paused.
         val icon = if (running && !paused) R.drawable.ic_pause else R.drawable.ic_play
         val label = when {
@@ -258,10 +366,10 @@ class MainActivity : Activity() {
             paused -> "Resume"
             else -> "Pause"
         }
-        val main = ui.navItem(icon, label, selected = false, enabled = true, filled = true) { onMainClicked() }
+        val main = ui.navItem(icon, label, false, true, filled = true) { onMainClicked() }
         main.contentDescription = "$label overlay"
         navBar.addView(main, ui.lp(0, -2, 1f))
-        updateStop()
+        updateStop(true)
     }
 
     // ---------------------------------------------------------------- Stop button animation
@@ -283,7 +391,6 @@ class MainActivity : Activity() {
         navBar.translationX = if (show) 0f else stopShift() / 2f
         stopBtn.translationX = if (show) 0f else -stopShift()
         stopBtn.scaleX = if (show) 1f else 0.85f
-        stopBtn.scaleY = if (show) 1f else 0.85f
         stopBtn.alpha = if (show) 1f else 0f
         stopBtn.visibility = if (show) View.VISIBLE else View.GONE
         setStopAccessibility(show)
@@ -294,10 +401,10 @@ class MainActivity : Activity() {
      * up centred. When the overlay stops it plays backwards. A change in the middle of an animation
      * simply continues from where the views are now.
      */
-    private fun updateStop() {
+    private fun updateStop(animate: Boolean) {
         val show = OverlayService.running
         if (show == stopShown) return
-        if (store.bool(K_REDUCED)) {
+        if (!animate || store.bool(K_REDUCED)) {
             setStopInstant(show)
             return
         }
@@ -311,7 +418,7 @@ class MainActivity : Activity() {
         val duration = 460L
         stopBtn.animate()
             .translationX(if (show) 0f else -shift)
-            .scaleX(scale).scaleY(scale)
+            .scaleX(scale)
             .setDuration(duration)
             .setInterpolator(if (show) OvershootInterpolator(1.8f) else AccelerateDecelerateInterpolator())
             .start()
@@ -357,16 +464,8 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(4), dp(4), dp(4), dp(12))
         }
-        if (back) {
-            row.addView(ui.iconButton(R.drawable.ic_back, "Back") { go(SCREEN_HOME) }, ui.lp(dp(48), dp(48)))
-        } else {
-            val logo = ImageView(this).apply {
-                setImageResource(R.drawable.ic_logo)
-                contentDescription = "Beat Overlay logo"
-            }
-            row.addView(logo, ui.lp(dp(36), dp(36)).apply { marginStart = dp(4); marginEnd = dp(4) })
-        }
-        val t = ui.tv(title, 28f, p.text, true).apply { setPadding(dp(8), 0, 0, 0) }
+        if (back) row.addView(ui.iconButton(R.drawable.ic_back, "Back") { go(SCREEN_HOME) }, ui.lp(dp(48), dp(48)))
+        val t = ui.tv(title, 28f, p.text, true).apply { setPadding(if (back) dp(4) else dp(12), 0, 0, 0) }
         ui.heading(t)
         row.addView(t, ui.lp(0, -2, 1f))
         if (settingsButton) {
@@ -375,10 +474,233 @@ class MainActivity : Activity() {
         page.addView(row)
     }
 
+    // ---------------------------------------------------------------- First-time setup
+
+    private fun setupSteps(): List<Int> = buildList {
+        add(STEP_WELCOME)
+        add(STEP_OVERLAY)
+        if (Build.VERSION.SDK_INT >= 33) add(STEP_NOTIF)
+        add(STEP_SIZE)
+        add(STEP_GESTURES)
+    }
+
+    private fun overlayAllowed() = Settings.canDrawOverlays(this)
+
+    private fun notificationsAllowed() =
+        Build.VERSION.SDK_INT < 33 ||
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+
+    private fun buildSetup() {
+        val steps = setupSteps()
+        val index = setupStep.coerceIn(0, steps.size - 1)
+        setupStep = index
+
+        topBar("Setup")
+        page.addView(ui.tv("Step ${index + 1} of ${steps.size}", 14f, p.sub).apply {
+            setPadding(dp(16), 0, dp(16), dp(12))
+        })
+
+        var nextEnabled = true
+        when (steps[index]) {
+            STEP_WELCOME -> setupWelcome()
+            STEP_OVERLAY -> nextEnabled = setupOverlayPermission()
+            STEP_NOTIF -> setupNotifications()
+            STEP_SIZE -> setupSize()
+            else -> setupGestures()
+        }
+        setupButtons(index, steps.size, nextEnabled)
+    }
+
+    private fun setupWelcome() {
+        val c = ui.card(page, "Welcome")
+        ui.note(c, "Beat Overlay puts a thin rhythm bar on top of any app.")
+        ui.note(c, "Beats scroll through the white line in the middle and your phone buzzes on every beat. " +
+                "The tempo speeds up, drifts, pauses and rests on its own.")
+        ui.note(c, "This quick setup takes about a minute.")
+    }
+
+    /** Returns true when the permission is granted (Next is only enabled then). */
+    private fun setupOverlayPermission(): Boolean {
+        val allowed = overlayAllowed()
+        val c = ui.card(page, "Display over other apps")
+        ui.note(c, "Beat Overlay needs this permission to draw the bar on top of other apps. " +
+                "Without it the bar cannot appear.")
+        c.target.addView(
+            ui.tv(if (allowed) "✓ Allowed" else "Not allowed yet", 18f, p.text, true).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(12), 0, dp(4))
+            }
+        )
+        if (!allowed) {
+            c.target.addView(
+                ui.pillButton("Open permission settings", true) {
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                },
+                ui.lp(-1, dp(48)).apply { topMargin = dp(8) }
+            )
+            ui.note(c, "Find Beat Overlay in the list, switch it on, then come back here.")
+        }
+        return allowed
+    }
+
+    private fun setupNotifications() {
+        val allowed = notificationsAllowed()
+        val c = ui.card(page, "Notifications (optional)")
+        ui.note(c, "While the overlay runs, Android shows a small \"Beat overlay running\" notification. " +
+                "On Android 13 and newer it stays hidden unless you allow notifications. The overlay works either way.")
+        c.target.addView(
+            ui.tv(if (allowed) "✓ Allowed" else "Not allowed yet", 18f, p.text, true).apply {
+                gravity = Gravity.CENTER
+                setPadding(0, dp(12), 0, dp(4))
+            }
+        )
+        if (!allowed) {
+            c.target.addView(
+                ui.pillButton("Allow notifications", true) {
+                    requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+                },
+                ui.lp(-1, dp(48)).apply { topMargin = dp(8) }
+            )
+            ui.note(c, "If nothing appears, open Android's Settings, then Apps, Beat Overlay, Notifications.")
+        }
+    }
+
+    private fun setupSize() {
+        val c = ui.card(page, "Size and position")
+        ui.note(c, "Choose how wide and thick the bar is and where it sits. " +
+                "Press Show overlay to try the real bar; you can drag it up or down at any time.")
+        ui.slider(c, K_BAR_W, "Width", 40, 100, "%")
+        ui.slider(c, K_BAR_H, "Thickness", 24, 72, "dp")
+        ui.slider(c, K_BAR_Y_PCT, "Vertical position", 0, 100, "%")
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(16), 0, 0)
+        }
+        row.addView(ui.pillButton("Show overlay", true) { startOverlay() }, ui.lp(0, dp(48), 1f).apply { marginEnd = dp(8) })
+        row.addView(
+            ui.pillButton("Hide overlay", false) { stopService(Intent(this, OverlayService::class.java)) },
+            ui.lp(0, dp(48), 1f)
+        )
+        c.target.addView(row)
+    }
+
+    /** Last step: how to move the bar, what each gesture does right now, and a pad to try them on. */
+    private fun setupGestures() {
+        var c = ui.card(page, "Move the bar")
+        ui.note(c, "Drag the bar up or down to move it anywhere on the screen. " +
+                "Small ▲▼ arrows at its left end remind you; they fade out a few seconds after the overlay starts.")
+
+        c = ui.card(page, "Gestures")
+        GESTURE_KEYS.forEachIndexed { i, key ->
+            c.target.addView(
+                ui.tv("${GESTURE_NAMES[i]}: ${ACTION_LABELS[store.int(key)]}", 16f, p.text).apply {
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(8), 0, dp(2))
+                }
+            )
+        }
+        ui.note(c, "A single tap does nothing. You can change all of this later in Settings, under Gestures.")
+
+        c = ui.card(page, "Try it")
+        ui.note(c, "Use the pad like the real bar. Nothing is triggered here; it only shows what each gesture would do.")
+        practicePad(c)
+    }
+
+    private fun practicePad(c: Card) {
+        val label = ui.tv("Try the gestures here", 16f, p.text, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        val pad = FrameLayout(this).apply {
+            background = ui.rounded(p.field, 20)
+            contentDescription = "Practice area for the overlay gestures"
+        }
+        pad.addView(label, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+
+        // Same recogniser as the real bar, so double tap waits for a third tap only if triple tap has an action.
+        val gestures = OverlayGestures(this, object : OverlayGestures.Listener {
+            override fun onDrag(dy: Float) {
+                label.text = "↕ Drag: moves the bar up or down"
+            }
+            override fun onGesture(gesture: Int) {
+                label.text = "${GESTURE_NAMES[gesture]}: ${ACTION_LABELS[store.int(GESTURE_KEYS[gesture])]}"
+            }
+            override fun hasHold() = store.int(K_G_HOLD) != ACT_NONE
+            override fun hasTripleTap() = store.int(K_G_TRIPLE) != ACT_NONE
+        })
+        pad.setOnTouchListener { v, e ->
+            // Keep the page from scrolling while a finger is on the pad.
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) v.parent.requestDisallowInterceptTouchEvent(true)
+            gestures.onTouch(v, e)
+        }
+        c.target.addView(pad, ui.lp(-1, dp(140)).apply { topMargin = dp(12) })
+    }
+
+    private fun setupButtons(index: Int, count: Int, nextEnabled: Boolean) {
+        val last = index == count - 1
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(8), 0, dp(4))
+        }
+        if (index > 0) {
+            row.addView(
+                ui.pillButton("Back", false) {
+                    currentFocus?.clearFocus()
+                    setupStep = index - 1
+                    render(false)
+                },
+                ui.lp(0, dp(52), 1f).apply { marginEnd = dp(8) }
+            )
+        }
+        val next = ui.pillButton(if (last) "Finish" else "Next", true) {
+            currentFocus?.clearFocus()
+            if (last) {
+                finishSetup()
+            } else {
+                setupStep = index + 1
+                render(false)
+            }
+        }.apply {
+            if (!nextEnabled) {
+                isEnabled = false
+                alpha = 0.4f
+            }
+        }
+        row.addView(next, ui.lp(0, dp(52), 1f))
+        page.addView(row)
+
+        page.addView(
+            ui.tv("Skip setup", 14f, p.sub).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(14), dp(8), dp(14))
+                isClickable = true
+                isFocusable = true
+                contentDescription = "Skip setup"
+                setOnClickListener { finishSetup() }
+            },
+            ui.lp(-1, -2)
+        )
+    }
+
+    private fun finishSetup() {
+        currentFocus?.clearFocus()
+        store.setBool(K_SETUP_DONE, true)
+        screen = SCREEN_HOME
+        render(false)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (screen == SCREEN_SETUP) render(true)
+    }
+
     // ---------------------------------------------------------------- Home
 
     private fun buildHome() {
         topBar("Beat Overlay")
+        page.addView(ui.tv("Changes take effect when you press Apply.", 13f, p.sub).apply {
+            setPadding(dp(16), 0, dp(16), dp(12))
+        })
 
         var c = ui.card(page, "Tempo")
         ui.slider(c, K_BPM, "Starting BPM", 30, 240, "bpm")
@@ -527,6 +849,16 @@ class MainActivity : Activity() {
         ui.note(c, "Dragging the bar up or down always moves it. Choose what the other gestures do.")
         GESTURE_KEYS.forEachIndexed { i, key -> gestureRow(c, GESTURE_NAMES[i], key) }
 
+        c = ui.card(page, "Setup and tutorial")
+        ui.note(c, "Re-check the permissions and replay the gesture tutorial.")
+        c.target.addView(
+            ui.pillButton("Run setup again", false) {
+                setupStep = 0
+                go(SCREEN_SETUP)
+            },
+            ui.lp(-1, dp(48)).apply { topMargin = dp(8) }
+        )
+
         c = ui.card(page, "Backup")
         ui.note(c, "Save or load all settings and presets as a file.")
         val row = LinearLayout(this).apply {
@@ -581,10 +913,6 @@ class MainActivity : Activity() {
             setPadding(0, dp(12), 0, 0)
         }
         row.addView(
-            ui.pillButton("Use app logo", false) { useAppLogo() },
-            ui.lp(0, dp(48), 1f).apply { marginEnd = dp(8) }
-        )
-        row.addView(
             ui.pillButton(if (hasImage) "Change picture" else "Choose picture", true) { pickImage() },
             ui.lp(0, dp(48), 1f).apply { if (hasImage) marginEnd = dp(8) }
         )
@@ -594,24 +922,6 @@ class MainActivity : Activity() {
         ui.slider(c, K_MARKER_SIZE, "Size", 50, 150, "%")
         ui.note(c, "PNG, JPG, WebP or SVG. Pictures with a transparent background work best. " +
                 "Simple SVG shapes work; animations and some effects do not.")
-    }
-
-    private fun useAppLogo() {
-        toast("Loading logo…")
-        val appContext = applicationContext
-        Thread {
-            val bytes = resources.openRawResource(R.raw.logo_beatoverlay).readBytes()
-            val error = MarkerImage.importFromBytes(appContext, bytes)
-            runOnUiThread {
-                if (error == null) {
-                    store.setBool(K_USE_IMAGE, true)
-                    if (!isDestroyed) render(true)
-                    toast("App logo set as beat marker")
-                } else {
-                    toast(error)
-                }
-            }
-        }.start()
     }
 
     private fun pickImage() {
@@ -627,7 +937,7 @@ class MainActivity : Activity() {
                 },
                 REQ_IMAGE
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             toast("No file picker found on this phone")
         }
     }
@@ -740,8 +1050,9 @@ class MainActivity : Activity() {
     private fun configIntent(): Intent {
         store.syncPosition()
         val i = Intent(this, OverlayService::class.java)
-        store.values.forEach { (k, v) -> i.putExtra(k, v) }
-        store.flags.forEach { (k, v) -> i.putExtra(k, v) }
+        // Home settings that are waiting for Apply are not sent; the overlay gets the last applied values.
+        store.values.forEach { (k, v) -> i.putExtra(k, if (k in SettingsStore.PRESET_INTS) store.appliedInt(k) else v) }
+        store.flags.forEach { (k, v) -> i.putExtra(k, if (k in SettingsStore.PRESET_BOOLS) store.appliedBool(k) else v) }
         return i
     }
 
@@ -750,14 +1061,14 @@ class MainActivity : Activity() {
         if (!Settings.canDrawOverlays(this)) {
             toast("Allow \"Display over other apps\", then press Start again")
             startActivity(
-                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:$packageName".toUri())
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             )
             return
         }
         if (Build.VERSION.SDK_INT >= 33 &&
             checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) {
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
         }
         startForegroundService(configIntent())
     }

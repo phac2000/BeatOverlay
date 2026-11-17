@@ -1,5 +1,9 @@
 package com.example.beatoverlay
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
+import android.animation.ArgbEvaluator
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -15,7 +19,8 @@ import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewOutlineProvider
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
@@ -86,7 +91,6 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             orientation = LinearLayout.VERTICAL
             background = rounded(p.card, 28)
             elevation = if (p.isDark) 0f else dp(2).toFloat()
-            outlineProvider = ViewOutlineProvider.BACKGROUND
             setPadding(dp(18), dp(18), dp(18), dp(20))
         }
         val t = tv(title, 22f, p.text, true).apply { gravity = Gravity.CENTER }
@@ -360,39 +364,103 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
      * One destination / action in the floating bar: icon on a pill, label underneath.
      * [filled] gives it the strong accent colour (used for the main Start / Pause / Resume button).
      */
-    fun navItem(icon: Int, label: String, selected: Boolean, enabled: Boolean, filled: Boolean = false, onClick: () -> Unit): View {
+    fun navItem(
+        icon: Int, label: String, selected: Boolean, enabled: Boolean,
+        filled: Boolean = false, strong: Boolean = false, badge: Boolean = false, firmTick: Boolean = false,
+        onClick: () -> Unit
+    ): View {
+        val fillIt = filled || badge          // a badge (changes waiting) also gets the highlighted pill
         val indicator = FrameLayout(ctx).apply {
-            if (filled) background = rounded(p.accent, 16)
+            if (fillIt) background = rounded(p.accent, 16)
             else if (selected) background = rounded(p.navIndicator, 16)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         indicator.addView(
             ImageView(ctx).apply {
                 setImageResource(icon)
-                imageTintList = ColorStateList.valueOf(if (filled) p.onAccent else if (selected) p.onTonal else p.sub)
+                imageTintList = ColorStateList.valueOf(
+                    if (fillIt) p.onAccent else if (selected) p.onTonal else if (strong) p.text else p.sub
+                )
             },
             FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER)
         )
-        val caption = tv(label, 12f, if (selected || filled) p.text else p.sub, selected || filled).apply {
+        if (badge) {
+            // Small dot above the top-right of the icon.
+            indicator.addView(
+                View(ctx).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(p.onAccent) }
+                },
+                FrameLayout.LayoutParams(dp(8), dp(8), Gravity.TOP or Gravity.LEFT).apply {
+                    leftMargin = dp(29)
+                    topMargin = dp(1)
+                }
+            )
+        }
+        val caption = tv(label, 11f, if (selected || fillIt || strong) p.text else p.sub, selected || fillIt || strong).apply {
             gravity = Gravity.CENTER
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(2), dp(4), dp(2), dp(4))
-            addView(indicator, lp(dp(48), dp(32)))
+            setPadding(dp(1), dp(4), dp(1), dp(4))
+            addView(indicator, lp(dp(44), dp(30)))
             addView(caption, lp(wrapContent, wrapContent).apply { topMargin = dp(2) })
             contentDescription = if (enabled) label else "$label, available after the overlay starts"
             isSelected = selected
-            isClickable = true
-            isFocusable = true
+            isEnabled = enabled            // a disabled item is greyed out and cannot be pressed
+            isClickable = enabled
+            isFocusable = enabled
             alpha = if (enabled) 1f else 0.5f
             background = ripple(Color.TRANSPARENT, 20)
             setOnClickListener {
-                tick(this, filled)
+                tick(this, filled || firmTick)
                 onClick()
             }
+        }
+    }
+
+    /**
+     * "Applied" animation for an Apply item built with badge = true: the check pops, the dot shrinks
+     * away and the highlight fades to the grey "nothing to apply" look. [onDone] runs at the end.
+     */
+    fun playApplied(item: View, onDone: () -> Unit) {
+        val group = item as? ViewGroup
+        val indicator = group?.getChildAt(0) as? ViewGroup
+        val caption = group?.getChildAt(1) as? TextView
+        val icon = indicator?.getChildAt(0) as? ImageView
+        if (group == null || indicator == null || caption == null || icon == null) {
+            onDone()
+            return
+        }
+        val dot = if (indicator.childCount > 1) indicator.getChildAt(1) else null
+
+        icon.animate().scaleX(1.3f).scaleY(1.3f).setDuration(140).setInterpolator(DecelerateInterpolator())
+            .withEndAction {
+                icon.animate().scaleX(1f).scaleY(1f).setDuration(280)
+                    .setInterpolator(OvershootInterpolator(3f)).start()
+            }
+            .start()
+        dot?.animate()?.scaleX(0f)?.scaleY(0f)?.alpha(0f)?.setDuration(200)?.start()
+
+        val highlight = indicator.background
+        val argb = ArgbEvaluator()
+        ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 360
+            startDelay = 120
+            addUpdateListener { a ->
+                val f = a.animatedFraction
+                highlight?.alpha = ((1f - f) * 255).toInt()
+                icon.imageTintList = ColorStateList.valueOf(argb.evaluate(f, p.onAccent, p.sub) as Int)
+                caption.setTextColor(argb.evaluate(f, p.text, p.sub) as Int)
+                group.alpha = 1f - 0.5f * f          // ends at the same look as a disabled item
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    onDone()
+                }
+            })
+            start()
         }
     }
 
@@ -404,21 +472,20 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            elevation = dp(6).toFloat()          // lower than the bar (8), so it slides out from underneath
-            outlineProvider = ViewOutlineProvider.BACKGROUND
-            setPadding(dp(4), dp(8), dp(4), dp(8))
+            elevation = dp(8).toFloat()          // same depth as the bar; the bar is added later, so it draws on top
+            setPadding(dp(4), dp(6), dp(4), dp(6))
             addView(
                 ImageView(ctx).apply {
                     setImageResource(R.drawable.ic_stop)
                     imageTintList = ColorStateList.valueOf(fg)
                     importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 },
-                lp(dp(28), dp(28))
+                lp(dp(24), dp(24))
             )
-            addView(tv("Stop", 12f, fg, true), lp(wrapContent, wrapContent).apply { topMargin = dp(2) })
+            addView(tv("Stop", 11f, fg, true), lp(wrapContent, wrapContent).apply { topMargin = dp(2) })
             isClickable = true
             isFocusable = true
-            background = ripple(p.accentStrong, 36)
+            background = ripple(p.accentStrong, 32)
             setOnClickListener {
                 tick(this, true)
                 onClick()
