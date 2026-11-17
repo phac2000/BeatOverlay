@@ -1,7 +1,7 @@
 # Beat Overlay
 
 <p align="center">
-  <img src="app/src/main/res/drawable/ic_logo.xml" width="128" height="128" alt="Beat Overlay Logo">
+  <img src="app/src/main/res/raw/logo_beatoverlay.svgl" width="128" height="128" alt="Beat Overlay Logo">
 </p>
 
 **Beat Overlay** is a feature-rich, highly customizable Android application that draws a floating rhythm bar over other apps and games. Designed for rhythm training, tempo practice, and gaming overlays, it provides real-time visual beat tracking, tempo progression, random pauses, slow rests, and haptic feedback.
