@@ -3,6 +3,7 @@ package com.example.beatoverlay
 import android.content.Context
 import android.provider.Settings
 import org.json.JSONObject
+import java.io.File
 
 /**
  * Every setting lives here and is saved the moment it changes.
@@ -33,14 +34,24 @@ class SettingsStore(private val ctx: Context) {
         BOOL_DEFAULTS.forEach { (k, d) -> flags[k] = prefs.getBoolean(k, d) }
         // First run: follow Android's "remove animations" setting.
         if (!prefs.contains(K_REDUCED)) flags[K_REDUCED] = systemReducedMotion()
+        syncPosition()
     }
 
+    /** The bar position lives in a small file shared with the overlay, which runs in its own process. */
+    private val posFile get() = File(ctx.filesDir, OverlayService.POS_FILE)
+
     /**
-     * The overlay saves its own position when you drag it. Picks that up.
+     * The overlay saves its position to a file when you drag it. Picks that up.
+     * Before the first drag there is no file, so the saved setting is used.
      * Returns true if the position changed.
      */
     fun syncPosition(): Boolean {
-        val v = prefs.getInt(K_BAR_Y_PCT, INT_DEFAULTS.getValue(K_BAR_Y_PCT))
+        val fromFile = try {
+            posFile.readText().trim().toIntOrNull()?.coerceIn(0, 100)
+        } catch (e: Exception) {
+            null
+        }
+        val v = fromFile ?: prefs.getInt(K_BAR_Y_PCT, INT_DEFAULTS.getValue(K_BAR_Y_PCT))
         val changed = values[K_BAR_Y_PCT] != v
         values[K_BAR_Y_PCT] = v
         return changed
@@ -52,6 +63,13 @@ class SettingsStore(private val ctx: Context) {
     private fun putInt(k: String, v: Int) {
         values[k] = v
         prefs.edit().putInt(k, v).apply()
+        if (k == K_BAR_Y_PCT) {
+            try {
+                posFile.writeText(v.toString())     // keeps the file and the setting the same
+            } catch (e: Exception) {
+                // The setting is still saved; only the shared copy is missed.
+            }
+        }
     }
 
     private fun putBool(k: String, v: Boolean) {
@@ -142,7 +160,7 @@ class SettingsStore(private val ctx: Context) {
         PRESET_BOOLS.forEach { o.put(it, bool(it)) }
         val all = savedPresets()
         all.put(name, o)
-                prefs.edit().putString("presets", all.toString()).apply()
+        prefs.edit().putString("presets", all.toString()).apply()
         currentPreset = name
     }
 

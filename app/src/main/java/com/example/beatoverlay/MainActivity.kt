@@ -6,7 +6,10 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.app.AlertDialog
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
@@ -30,6 +33,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import java.io.File
 import android.animation.ValueAnimator
@@ -94,14 +98,43 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val syncRunnable = Runnable {
-        if (OverlayService.running) startForegroundService(configIntent())
+        if (overlayRunning) startForegroundService(configIntent())
     }
+
+    // The overlay runs in its own process, so the app is told its state by messages.
+    private var overlayRunning = false
+    private var overlayPaused = false
+    private var stateReceiverOn = false
+
+    private val stateReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != OverlayService.ACTION_STATE) return
+            handler.removeCallbacks(noAnswer)
+            overlayRunning = intent.getBooleanExtra(OverlayService.EXTRA_RUNNING, false)
+            overlayPaused = intent.getBooleanExtra(OverlayService.EXTRA_PAUSED, false)
+            fillNav()
+        }
+    }
+
+    /** Runs when the overlay did not answer a ping: it is not running. */
+    private val noAnswer = Runnable {
+        if (overlayRunning || overlayPaused) {
+            overlayRunning = false
+            overlayPaused = false
+            fillNav()
+        }
+    }
+
+    private fun sendToOverlay(action: String) =
+        sendBroadcast(Intent(action).setPackage(packageName))
 
     private fun dp(v: Int) = ui.dp(v)
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Ask for the screen's top refresh rate (for example 120 Hz) so this window does not vote for 60.
+        window.attributes = window.attributes.apply { preferredRefreshRate = highestRefreshRate(this@MainActivity) }
         store = SettingsStore(this)
         store.onChange = {
             handler.removeCallbacks(syncRunnable)
@@ -123,7 +156,13 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        OverlayService.listener = { fillNav() }
+        ContextCompat.registerReceiver(
+            this, stateReceiver, IntentFilter(OverlayService.ACTION_STATE), ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        stateReceiverOn = true
+        sendToOverlay(OverlayService.ACTION_PING)           // ask the overlay for its state
+        handler.removeCallbacks(noAnswer)
+        handler.postDelayed(noAnswer, 700)
         // The overlay saves its position when it is dragged; show the new value if it changed.
         // The setup screens show live permission status, so rebuild them when coming back from Android's settings.
         if (store.syncPosition() || screen == SCREEN_SETUP) render(true)
@@ -131,7 +170,11 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
-        OverlayService.listener = null
+        handler.removeCallbacks(noAnswer)
+        if (stateReceiverOn) {
+            unregisterReceiver(stateReceiver)
+            stateReceiverOn = false
+        }
         super.onPause()
     }
 
@@ -248,7 +291,7 @@ class MainActivity : Activity() {
             }
         }
         navHolder.visibility = if (screen == SCREEN_SETUP) View.GONE else View.VISIBLE
-        setStopInstant(OverlayService.running)
+        setStopInstant(overlayRunning)
 
         when (screen) {
             SCREEN_HOME -> buildHome()
@@ -345,7 +388,7 @@ class MainActivity : Activity() {
         currentFocus?.clearFocus()   // commits a number that is still being typed
         if (!store.hasPending()) return
         store.applyPending()
-        toast(if (OverlayService.running) "Applied to the overlay" else "Applied")
+        toast(if (overlayRunning) "Applied to the overlay" else "Applied")
         val item = applyItem
         if (item == null || store.bool(K_REDUCED)) {
             updateApplyButton()
@@ -368,8 +411,8 @@ class MainActivity : Activity() {
 
     private fun fillNav() {
         if (!::navBar.isInitialized) return
-        val running = OverlayService.running
-        val paused = OverlayService.paused
+        val running = overlayRunning
+        val paused = overlayPaused
         applyPending = store.hasPending()
         navBar.removeAllViews()
         navBar.addView(
@@ -482,7 +525,7 @@ class MainActivity : Activity() {
      * simply continues from where the views are now.
      */
     private fun updateStop(animate: Boolean) {
-        val show = OverlayService.running
+        val show = overlayRunning
         if (show == stopShown) return
         if (!animate || store.bool(K_REDUCED)) {
             setStopInstant(show)
@@ -527,13 +570,12 @@ class MainActivity : Activity() {
     }
 
     private fun onPauseClicked() {
-        val service = OverlayService.instance
-        if (service == null) toast("Start the overlay first") else service.togglePause()
+        if (!overlayRunning) toast("Start the overlay first") else sendToOverlay(OverlayService.ACTION_PAUSE)
     }
 
     /** The combined button: Start when stopped, Pause while running, Resume while paused. */
     private fun onMainClicked() {
-        if (!OverlayService.running) startOverlay() else onPauseClicked()
+        if (!overlayRunning) startOverlay() else onPauseClicked()
     }
 
     // ---------------------------------------------------------------- shared pieces

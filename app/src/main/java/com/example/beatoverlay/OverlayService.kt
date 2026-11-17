@@ -5,19 +5,42 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.view.Display
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.WindowManager
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import java.io.File
 import kotlin.math.roundToInt
+
+/**
+ * The highest refresh rate the screen offers at its current resolution (for example 120f).
+ * Returns 0f ("no preference") when it cannot be found.
+ */
+fun highestRefreshRate(context: Context): Float {
+    val dm = context.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+    val display = dm.getDisplay(Display.DEFAULT_DISPLAY) ?: return 0f
+    val current = display.mode
+    var best = current.refreshRate
+    for (m in display.supportedModes) {
+        if (m.physicalWidth == current.physicalWidth && m.physicalHeight == current.physicalHeight &&
+            m.refreshRate > best
+        ) best = m.refreshRate
+    }
+    return best
+}
 
 class OverlayService : Service() {
 
@@ -27,7 +50,20 @@ class OverlayService : Service() {
     private lateinit var gestures: OverlayGestures
 
     private val handler = Handler(Looper.getMainLooper())
-    private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+
+    // Shown to the app through broadcasts (the overlay runs in its own process).
+    private var running = false
+    private var paused = false
+
+    /** Answers the app: "ping" = tell me your state, "pause" = toggle pause. */
+    private val commands = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                ACTION_PING -> notifyState()
+                ACTION_PAUSE -> if (bar != null) togglePause()
+            }
+        }
+    }
 
     // Layout (from settings) and what each gesture does. The defaults match SettingsStore.
     private var barW = 90
@@ -41,10 +77,18 @@ class OverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        val filter = IntentFilter().apply {
+            addAction(ACTION_PING)
+            addAction(ACTION_PAUSE)
+        }
+        ContextCompat.registerReceiver(this, commands, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForeground(1, buildNotification())
         running = true
-        instance = this
 
         if (bar == null) createBar()
 
@@ -53,6 +97,7 @@ class OverlayService : Service() {
         } else {
             // Android restarted the service after killing it: use the saved settings.
             val store = SettingsStore(this)
+            readSavedY()?.let { store.values[K_BAR_Y_PCT] = it }
             configure({ k, d -> store.values[k] ?: d }, { k, d -> store.flags[k] ?: d })
         }
         notifyState()
@@ -64,7 +109,7 @@ class OverlayService : Service() {
         val store = SettingsStore(this)
         barW = store.int(K_BAR_W)
         barH = store.int(K_BAR_H)
-        barYPct = store.int(K_BAR_Y_PCT)
+        barYPct = readSavedY() ?: store.int(K_BAR_Y_PCT)
 
         val view = BeatBarView(this)
         params = WindowManager.LayoutParams(
@@ -72,7 +117,11 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL }
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            // The bar redraws every frame. Asking for the top refresh rate keeps it from pulling the screen down to 60 Hz.
+            preferredRefreshRate = highestRefreshRate(this@OverlayService)
+        }
         computeLayout()
 
         gestures = OverlayGestures(this, gestureListener)
@@ -162,11 +211,22 @@ class OverlayService : Service() {
         wm.updateViewLayout(b, params)
     }
 
-    /** Remembers where the bar was dropped; the app picks this up the next time it opens. */
+    /** The position saved by the last drag, or null if there is none. */
+    private fun readSavedY(): Int? = try {
+        File(filesDir, POS_FILE).readText().trim().toIntOrNull()?.coerceIn(0, 100)
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Remembers where the bar was dropped, in a small file the app reads when it opens. */
     private fun savePosition() {
         val m = maxY()
         barYPct = if (m == 0) 0 else (params.y * 100f / m).roundToInt().coerceIn(0, 100)
-        prefs.edit().putInt(K_BAR_Y_PCT, barYPct).apply()
+        try {
+            File(filesDir, POS_FILE).writeText(barYPct.toString())
+        } catch (e: Exception) {
+            // Not saved: the bar simply opens at its old position next time.
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -248,7 +308,12 @@ class OverlayService : Service() {
     }
 
     private fun notifyState() {
-        listener?.invoke()
+        sendBroadcast(
+            Intent(ACTION_STATE)
+                .setPackage(packageName)
+                .putExtra(EXTRA_RUNNING, running)
+                .putExtra(EXTRA_PAUSED, paused)
+        )
     }
 
     private fun openApp() {
@@ -286,20 +351,22 @@ class OverlayService : Service() {
         bar = null
         running = false
         paused = false
-        instance = null
         notifyState()
+        unregisterReceiver(commands)
         super.onDestroy()
     }
 
     companion object {
         const val CHANNEL = "overlay"
 
-        /** Read by the app screen to show Start / Stop and Pause / Resume. */
-        @Volatile var running = false
-        @Volatile var paused = false
-        @Volatile var instance: OverlayService? = null
+        // Messages between the app and the overlay (they are separate processes). Only this app can send or hear them.
+        const val ACTION_STATE = "com.example.beatoverlay.STATE"    // overlay -> app: running, paused
+        const val ACTION_PING = "com.example.beatoverlay.PING"      // app -> overlay: send your state
+        const val ACTION_PAUSE = "com.example.beatoverlay.PAUSE"    // app -> overlay: toggle pause
+        const val EXTRA_RUNNING = "running"
+        const val EXTRA_PAUSED = "paused"
 
-        /** Set by the app screen while it is visible; called whenever running / paused changes. */
-        var listener: (() -> Unit)? = null
+        /** Holds the bar's vertical position (0-100) after a drag; the app reads it when it opens. */
+        const val POS_FILE = "bar_y_pct.txt"
     }
 }
