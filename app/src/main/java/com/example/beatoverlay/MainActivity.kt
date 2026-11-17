@@ -32,11 +32,16 @@ import android.widget.ScrollView
 import android.widget.Toast
 import androidx.core.view.ViewCompat
 import java.io.File
+import android.animation.ValueAnimator
+import android.graphics.Outline
+import android.view.ViewOutlineProvider
+import android.view.animation.AccelerateInterpolator
 
 private const val SCREEN_HOME = 0
 private const val SCREEN_PRESETS = 1
 private const val SCREEN_SETTINGS = 2
 private const val SCREEN_SETUP = 3
+private const val COMPACT_DP = 72
 
 // First-time setup steps (the notification step is skipped before Android 13)
 private const val STEP_WELCOME = 0
@@ -78,6 +83,11 @@ class MainActivity : Activity() {
     private lateinit var navHolder: FrameLayout
     private var applyPending = false          // what the Apply item in the bar currently shows
     private var applyItem: View? = null        // the Apply item (Home only), kept for its animation
+    private var applyWasShown: Boolean? = null
+    private var applyAnim: ValueAnimator? = null
+    private lateinit var rootView: FrameLayout
+    private var compactBar: View? = null
+    private var switching = false
     private lateinit var stopBtn: View
     private var stopShown = false              // what the Stop button currently shows
     private var stopFade: ObjectAnimator? = null
@@ -187,6 +197,8 @@ class MainActivity : Activity() {
             clipChildren = false
             clipToPadding = false
         }
+        rootView = root
+        compactBar = null
         page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         scroll = ScrollView(this).apply {
             clipToPadding = false
@@ -202,6 +214,7 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             background = ui.rounded(p.navBg, 36)
             elevation = dp(8).toFloat()
+            clipChildren = false
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
         // The bar and the Stop button live in one holder. The bar sits at the left, Stop at the right
@@ -264,6 +277,10 @@ class MainActivity : Activity() {
 
     private fun applyInsets() {
         page.setPadding(dp(12), insetTop + dp(8), dp(12), insetBottom + dp(if (screen == SCREEN_SETUP) 24 else 128))
+        compactBar?.let {
+            it.layoutParams.height = insetTop + dp(COMPACT_DP)
+            it.requestLayout()
+        }
         (navHolder.layoutParams as FrameLayout.LayoutParams).bottomMargin = insetBottom + dp(16)
         navHolder.requestLayout()
     }
@@ -278,8 +295,28 @@ class MainActivity : Activity() {
     }
 
     private fun goNow(target: Int) {
-        screen = target
-        render(false)
+        if (target == screen || switching) return
+        val animate = !store.bool(K_REDUCED) && screen != SCREEN_SETUP && target != SCREEN_SETUP
+        if (!animate) {
+            screen = target
+            render(false)
+            return
+        }
+        val dir = if (target > screen) 1 else -1
+        val dist = dp(40).toFloat()
+        switching = true
+        scroll.animate().translationX(-dir * dist).alpha(0f).setDuration(110)
+            .setInterpolator(AccelerateInterpolator())
+            .withEndAction {
+                screen = target
+                render(false)
+                scroll.translationX = dir * dist
+                scroll.alpha = 0f
+                scroll.animate().translationX(0f).alpha(1f).setDuration(260)
+                    .setInterpolator(DecelerateInterpolator(1.6f)).start()
+                switching = false
+            }
+            .start()
     }
 
     private fun confirmLeaveHome(then: () -> Unit) {
@@ -347,17 +384,60 @@ class MainActivity : Activity() {
             ui.navItem(R.drawable.ic_settings, "Settings", screen == SCREEN_SETTINGS, true) { go(SCREEN_SETTINGS) },
             ui.lp(0, -2, 1f)
         )
-        // Apply (Home only): grey and not pressable until a Home setting has changed.
+        // Apply (Home only): grows in when Home opens, shrinks away when Home is left.
+        applyAnim?.cancel()
         applyItem = null
-        if (screen == SCREEN_HOME) {
+        val showApply = screen == SCREEN_HOME
+        val before = applyWasShown
+        applyWasShown = showApply
+        val animateSlot = before != null && before != showApply && !store.bool(K_REDUCED)
+        if (showApply || animateSlot) {
             val apply = ui.navItem(
                 R.drawable.ic_check, "Apply", false, applyPending,
                 strong = applyPending, badge = applyPending, firmTick = true
             ) { onApplyClicked() }
-            applyItem = apply
+            if (showApply) applyItem = apply
             apply.contentDescription = if (applyPending) "Apply changes" else "Apply changes, nothing to apply"
             ViewCompat.setStateDescription(apply, if (applyPending) "Changes waiting" else "Nothing to apply")
-            navBar.addView(apply, ui.lp(0, -2, 1f))
+            if (!animateSlot) {
+                navBar.addView(apply, ui.lp(0, -2, 1f))
+            } else {
+                val slot = FrameLayout(this).apply { clipChildren = false }
+                val itemW = (navBarWidth() - dp(16)) / 5
+                slot.addView(apply, FrameLayout.LayoutParams(itemW, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+                apply.isClickable = false
+                val slotLp = ui.lp(0, -2, if (showApply) 0f else 1f)
+                navBar.addView(slot, slotLp)
+                apply.scaleX = if (showApply) 0f else 1f
+                apply.scaleY = apply.scaleX
+                apply.alpha = apply.scaleX
+                val interpolator: android.view.animation.Interpolator =
+                    if (showApply) OvershootInterpolator(2.2f) else AccelerateInterpolator()
+                applyAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+                    duration = if (showApply) 420L else 220L
+                    addUpdateListener { a ->
+                        val f = interpolator.getInterpolation(a.animatedFraction)
+                        val t = if (showApply) f else 1f - f
+                        slotLp.weight = t.coerceAtLeast(0f)
+                        slot.layoutParams = slotLp
+                        apply.scaleX = t
+                        apply.scaleY = t
+                        apply.alpha = t.coerceIn(0f, 1f)
+                    }
+                    addListener(object : AnimatorListenerAdapter() {
+                        private var cancelled = false
+                        override fun onAnimationCancel(animation: Animator) {
+                            cancelled = true
+                        }
+                        override fun onAnimationEnd(animation: Animator) {
+                            if (cancelled) return
+                            applyAnim = null
+                            fillNav()
+                        }
+                    })
+                    start()
+                }
+            }
         }
         // One button for three jobs: Start when stopped, Pause while running, Resume while paused.
         val icon = if (running && !paused) R.drawable.ic_pause else R.drawable.ic_play
@@ -472,6 +552,72 @@ class MainActivity : Activity() {
             row.addView(ui.iconButton(R.drawable.ic_settings, "Settings") { go(SCREEN_SETTINGS) }, ui.lp(dp(48), dp(48)))
         }
         page.addView(row)
+    }
+
+    // ---------------------------------------------------------------- collapsing header
+
+    private fun logoView(): ImageView = ImageView(this).apply {
+        setImageDrawable(packageManager.getApplicationIcon(applicationInfo))
+        outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(v: View, o: Outline) {
+                o.setOval(0, 0, v.width, v.height)
+            }
+        }
+        clipToOutline = true
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    private fun versionLabel(): String = try {
+        "v" + packageManager.getPackageInfo(packageName, 0).versionName
+    } catch (e: Exception) {
+        ""
+    }
+
+    private fun collapsingHeader(title: String, home: Boolean = false) {
+        val bigH = (resources.displayMetrics.heightPixels * if (home) 0.5f else 0.3f).toInt()
+        val preset = "Preset: " + store.currentPreset
+
+        val big = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        big.addView(logoView(), ui.lp(dp(112), dp(112)))
+        val t = ui.tv(title, 32f, p.text, true)
+        ui.heading(t)
+        big.addView(t, ui.lp(-2, -2).apply { topMargin = dp(20) })
+        if (home) {
+            big.addView(ui.tv("Control and Focus on your beats", 17f, p.sub), ui.lp(-2, -2).apply { topMargin = dp(10) })
+            big.addView(ui.tv(versionLabel(), 14f, p.sub), ui.lp(-2, -2).apply { topMargin = dp(6) })
+        }
+        big.addView(ui.tv(preset, 14f, p.sub), ui.lp(-2, -2).apply { topMargin = dp(if (home) 12 else 8) })
+        page.addView(big, ui.lp(-1, bigH))
+
+        val bar = FrameLayout(this).apply {
+            setBackgroundColor(p.bg)
+            alpha = 0f
+            visibility = View.INVISIBLE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(20), 0, dp(20), 0)
+        }
+        row.addView(logoView(), ui.lp(dp(44), dp(44)))
+        row.addView(ui.tv(title, 22f, p.text, true).apply { setPadding(dp(12), 0, 0, 0) }, ui.lp(0, -2, 1f))
+        row.addView(ui.tv(preset, 13f, p.sub))
+        bar.addView(row, FrameLayout.LayoutParams(-1, dp(COMPACT_DP), Gravity.BOTTOM))
+        rootView.addView(bar, FrameLayout.LayoutParams(-1, insetTop + dp(COMPACT_DP), Gravity.TOP))
+        compactBar = bar
+
+        val from = bigH * 0.45f
+        val to = bigH * 0.8f
+        scroll.setOnScrollChangeListener { _, _, y, _, _ ->
+            val f = ((y - from) / (to - from)).coerceIn(0f, 1f)
+            bar.alpha = f
+            bar.visibility = if (f == 0f) View.INVISIBLE else View.VISIBLE
+            big.alpha = 1f - f
+        }
     }
 
     // ---------------------------------------------------------------- First-time setup
@@ -697,7 +843,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- Home
 
     private fun buildHome() {
-        topBar("Beat Overlay")
+        collapsingHeader("Beat Overlay", home = true)
         page.addView(ui.tv("Changes take effect when you press Apply.", 13f, p.sub).apply {
             setPadding(dp(16), 0, dp(16), dp(12))
         })
@@ -738,7 +884,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- Presets
 
     private fun buildPresets() {
-        topBar("Presets")
+        collapsingHeader("Presets")
 
         val save = ui.card(page, "Save current settings")
         ui.note(save, "Saves the Home settings (tempo, pauses, rests, drift) under a name.")
@@ -812,7 +958,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- Settings
 
     private fun buildSettings() {
-        topBar("Settings", back = true)
+        collapsingHeader("Settings")
 
         var c = ui.card(page, "Appearance")
         ui.segmented(c, "Theme", listOf("System", "Light", "Dark"), store.int(K_THEME)) {

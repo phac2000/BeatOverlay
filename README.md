@@ -23,7 +23,7 @@
 
 ---
 
-## 🛠️ Tech Stack & Requirements
+## Tech Stack & Requirements
 
 - **Language**: [Kotlin](https://kotlinlang.org/)
 - **Minimum SDK**: API 26 (Android 8.0 Oreo)
@@ -35,7 +35,7 @@
 
 ---
 
-## 🚀 Building & Installation
+## Building & Installation
 
 ### Prerequisites
 - Android Studio Iguana (2023.2.1) or newer

@@ -125,6 +125,13 @@ class SettingsStore(private val ctx: Context) {
 
     fun userPresets(): List<String> = savedPresets().keys().asSequence().toList().sortedBy { it.lowercase() }
 
+    /** Name shown in the Home header: the last preset that was saved or applied. */
+    var currentPreset: String
+        get() = prefs.getString("current_preset", "Default") ?: "Default"
+        private set(v) {
+            prefs.edit().putString("current_preset", v).apply()
+        }
+
     fun builtInPresets(): List<String> = BUILT_IN.keys.toList()
 
     fun isBuiltIn(name: String) = BUILT_IN.containsKey(name)
@@ -135,7 +142,8 @@ class SettingsStore(private val ctx: Context) {
         PRESET_BOOLS.forEach { o.put(it, bool(it)) }
         val all = savedPresets()
         all.put(name, o)
-        prefs.edit().putString("presets", all.toString()).apply()
+                prefs.edit().putString("presets", all.toString()).apply()
+        currentPreset = name
     }
 
     fun deletePreset(name: String) {
@@ -151,6 +159,7 @@ class SettingsStore(private val ctx: Context) {
             ?: return false
         PRESET_INTS.forEach { k -> putInt(k, (src[k] as? Number)?.toInt() ?: INT_DEFAULTS.getValue(k)) }
         PRESET_BOOLS.forEach { k -> putBool(k, (src[k] as? Boolean) ?: BOOL_DEFAULTS.getValue(k)) }
+        currentPreset = name
         onChange?.invoke()
         return true
     }
