@@ -32,6 +32,7 @@ const val K_REST_GAP_MAX = "restGapMax"
 const val K_CHAOS_START = "chaosStart"
 const val K_CHAOS_PCT = "chaosPct"
 const val K_CHAOS_GROW = "chaosGrow"
+const val K_CHAOS_ENABLED = "chaosEnabled"
 
 // App settings (not part of presets)
 const val K_HAPTICS = "haptics"
