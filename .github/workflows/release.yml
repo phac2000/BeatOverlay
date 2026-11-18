@@ -3,7 +3,7 @@ name: Build APK
 on:
   push:
     tags:
-      - "V0.1.1"
+      - "[vV]*"
 
 permissions:
   contents: write
