@@ -141,7 +141,8 @@ class SettingsStore(private val ctx: Context) {
         JSONObject()
     }
 
-    fun userPresets(): List<String> = savedPresets().keys().asSequence().toList().sortedBy { it.lowercase() }
+    /** Newest first: the stored JSON keeps insertion order, so the list is just reversed. */
+    fun userPresets(): List<String> = savedPresets().keys().asSequence().toList().reversed()
 
     /** Name shown in the Home header: the last preset that was saved or applied. */
     var currentPreset: String
@@ -159,6 +160,7 @@ class SettingsStore(private val ctx: Context) {
         PRESET_INTS.forEach { o.put(it, int(it)) }
         PRESET_BOOLS.forEach { o.put(it, bool(it)) }
         val all = savedPresets()
+        all.remove(name)   // so re-saving an existing name moves it to the top
         all.put(name, o)
         prefs.edit().putString("presets", all.toString()).apply()
         currentPreset = name
@@ -207,7 +209,7 @@ class SettingsStore(private val ctx: Context) {
             }
             root.optJSONObject("presets")?.let { imported ->
                 val all = savedPresets()
-                imported.keys().forEach { name -> all.put(name, imported.get(name)) }
+                imported.keys().forEach { name -> all.remove(name); all.put(name, imported.get(name)) }
                 prefs.edit().putString("presets", all.toString()).apply()
             }
             onChange?.invoke()
@@ -231,7 +233,7 @@ class SettingsStore(private val ctx: Context) {
         )
 
         val BOOL_DEFAULTS: Map<String, Boolean> = linkedMapOf(
-            K_PAUSES to true, K_REST_ENABLED to true, K_REST_RANDOM to true,
+            K_PAUSES to true, K_REST_ENABLED to true, K_REST_RANDOM to true, K_CHAOS_ENABLED to true,
             K_HAPTICS to true, K_REDUCED to false, K_SETUP_DONE to false, K_USE_IMAGE to false, K_NAV_HAPTICS to true
         )
 
@@ -250,7 +252,7 @@ class SettingsStore(private val ctx: Context) {
             "Default" to emptyMap<String, Any>(),
             "Warm-up" to mapOf(
                 K_BPM to 100, K_GROWTH to 5, K_MAX to 180,
-                K_PAUSES to false, K_REST_ENABLED to false,
+                K_PAUSES to false, K_REST_ENABLED to false, K_CHAOS_ENABLED to false,
                 K_CHAOS_PCT to 0, K_CHAOS_GROW to 0
             ),
             "Endurance" to mapOf(
