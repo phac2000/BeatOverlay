@@ -39,35 +39,35 @@ import kotlin.random.Random
 class BeatBarView(context: Context) : View(context) {
 
     class Config(
-        var bpm: Int = 155,
-        var growthPct: Int = 10,        // % tempo growth per minute (compounding)
+        var bpm: Int = 67,
+        var growthPct: Int = 0,         // % tempo growth per minute (compounding)
         var maxBpm: Int = 300,          // cap for the ramp (before randomness)
 
         var haptics: Boolean = true,
         var hapticStrengthPct: Int = 100,  // vibration strength, 1-100 %
         var hapticMs: Int = 35,            // vibration duration in milliseconds
 
-        var pausesEnabled: Boolean = true,
+        var pausesEnabled: Boolean = false,
         var gapMinSec: Int = 13,       // time between pauses
         var gapMaxSec: Int = 21,
         var lenMinSec: Int = 6,        // pause length
         var lenMaxSec: Int = 10,
         var countdownSec: Int = 3,     // countdown before restarting after a pause (0 = off)
 
-        var restEnabled: Boolean = true,
+        var restEnabled: Boolean = false,
         var restChancePct: Int = 11,   // chance a rest follows a pause
         var restSwapPct: Int = 20,     // chance a scheduled pause turns into a rest instead
         var restBpm: Int = 74,
         var restLenMinSec: Int = 8,    // rest length
         var restLenMaxSec: Int = 15,
-        var restRandom: Boolean = true, // rests may also start by themselves
+        var restRandom: Boolean = false, // rests may also start by themselves
         var restGapMinSec: Int = 20,   // time between self-started rests
         var restGapMaxSec: Int = 40,
 
         var chaosStartMin: Int = 1,    // randomness starts after this many minutes (0 = from the start)
         var chaosPct: Int = 50,        // starting max +/- tempo jump in percent (0 = off)
         var chaosGrowPct: Int = 10,    // percentage points added to the jump size every minute
-        var chaosEnabled: Boolean = true, // master switch for random tempo drift
+        var chaosEnabled: Boolean = false, // master switch for random tempo drift
     )
 
     var config = Config()
@@ -106,6 +106,7 @@ class BeatBarView(context: Context) : View(context) {
 
     /** Beat markers flash in place instead of scrolling across the bar. */
     var reducedMotion = false
+    var showBpm = false
 
     /** True while the user has paused the bar by hand (everything is frozen, timers included). */
     var manualPause = false
@@ -477,7 +478,7 @@ class BeatBarView(context: Context) : View(context) {
                 val digit = ceil(countdownRemainingMs / 1000f).toInt()
                 canvas.drawText("$digit", w / 2, h / 2 + text.textSize / 3, text)
             }
-            else -> {
+            showBpm -> {
                 text.alpha = 190
                 text.textSize = h * 0.36f
                 val bpmInt = shownBpm.toInt()
