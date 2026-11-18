@@ -23,6 +23,7 @@ import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.view.MotionEvent
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
@@ -70,11 +71,60 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
 
     fun heading(v: View) = ViewCompat.setAccessibilityHeading(v, true)
 
+    /** Press squish plus a tick when the finger lifts inside the view. Squish is skipped with Reduce motion. */
+    private fun bounce(touch: View, target: View = touch, depth: Float = 0.92f, firm: Boolean = false) {
+        fun springBack() {
+            if (store.bool(K_REDUCED)) return
+            target.animate().scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(OvershootInterpolator(3.5f)).start()
+        }
+        touch.setOnTouchListener { _, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> if (!store.bool(K_REDUCED)) {
+                    target.animate().scaleX(depth).scaleY(depth).setDuration(90)
+                        .setInterpolator(DecelerateInterpolator()).start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (e.x >= 0f && e.x <= touch.width && e.y >= 0f && e.y <= touch.height) tick(touch, firm)
+                    springBack()
+                }
+                MotionEvent.ACTION_CANCEL -> springBack()
+            }
+            false   // never consume: clicks and ripples work as before
+        }
+    }
+
+    /** Squish and tick for the buttons of an AlertDialog. Call it on the dialog returned by show(). */
+    fun tickDialog(d: android.app.AlertDialog) {
+        for (which in intArrayOf(
+            android.content.DialogInterface.BUTTON_POSITIVE,
+            android.content.DialogInterface.BUTTON_NEGATIVE,
+            android.content.DialogInterface.BUTTON_NEUTRAL
+        )) {
+            d.getButton(which)?.let { bounce(it) }
+        }
+    }
+
+    /** Small pop after a switch is toggled. */
+    private fun popSwitch(sw: View) {
+        if (store.bool(K_REDUCED)) return
+        tick(sw, false)
+        sw.pivotX = (sw.width - dp(28)).toFloat()
+        sw.pivotY = sw.height / 2f
+        sw.scaleX = 0.94f
+        sw.scaleY = 0.94f
+        sw.animate().scaleX(1f).scaleY(1f).setDuration(360).setInterpolator(OvershootInterpolator(4f)).start()
+    }
+
+    companion object {
+        /** Which segmented choice was just tapped, so the rebuilt screen can pop it in. */
+        private var popKey: String? = null
+    }
+
     /**
      * Short haptic tick for the bottom-bar buttons. [firm] is used for Start / Pause / Resume and Stop.
      * Uses the standard view feedback, so it follows the system's touch-feedback setting.
      */
-    private fun tick(v: View, firm: Boolean) {
+    fun tick(v: View, firm: Boolean = false) {
         if (!store.bool(K_NAV_HAPTICS)) return
         val effect = when {
             !firm -> HapticFeedbackConstants.VIRTUAL_KEY
@@ -149,9 +199,9 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
                 }
                 override fun onChildViewRemoved(parent: View?, child: View?) {}
             })
-            sw.setOnCheckedChangeListener { _, on -> store.setBool(key, on); applyGate(on) }
+            sw.setOnCheckedChangeListener { _, on -> store.setBool(key, on); popSwitch(sw); applyGate(on) }
         } else {
-            sw.setOnCheckedChangeListener { _, on -> store.setBool(key, on) }
+            sw.setOnCheckedChangeListener { _, on -> store.setBool(key, on); popSwitch(sw) }
         }
     }
 
@@ -166,6 +216,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         isClickable = true
         isFocusable = true
         contentDescription = description
+        bounce(this)
     }
 
     /**
@@ -231,7 +282,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
                 if (fromUser) refresh(pr + min, true)
             }
             override fun onStartTrackingTouch(s: SeekBar) {}
-            override fun onStopTrackingTouch(s: SeekBar) {}
+            override fun onStopTrackingTouch(s: SeekBar) { tick(s, false) }
         })
         minus.setOnClickListener { input.clearFocus(); refresh((store.int(key) - 1).coerceAtLeast(min), true) }
         plus.setOnClickListener { input.clearFocus(); refresh((store.int(key) + 1).coerceAtMost(max), true) }
@@ -308,7 +359,14 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
                 background = if (on) rounded(p.accent, 20) else null
                 contentDescription = "$title: $option"
                 ViewCompat.setStateDescription(this, if (on) "Selected" else "Not selected")
-                setOnClickListener { onSelect(i) }
+                setOnClickListener { popKey = "$title#$i"; onSelect(i) }
+                bounce(this)
+                if (on && popKey == "$title#$i") {
+                    popKey = null
+                    scaleX = 0.8f
+                    scaleY = 0.8f
+                    post { animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(OvershootInterpolator(3.5f)).start() }
+                }
             }
             group.addView(seg, lp(0, wrapContent, 1f))
         }
@@ -329,6 +387,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         setTextColor(if (filled) p.onAccent else p.onTonal)
         background = ripple(if (filled) p.accent else p.tonal, 28)
         setOnClickListener { onClick() }
+        bounce(this)
     }
 
     fun nameField(hint: String) = EditText(ctx).apply {
@@ -356,6 +415,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.BLACK) }
         )
         setOnClickListener { onClick() }
+        bounce(this, depth = 0.85f)
     }
 
     // ------------------------------------------------------------ floating navigation bar
@@ -413,10 +473,8 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             isFocusable = enabled
             alpha = if (enabled) 1f else 0.5f
             background = ripple(Color.TRANSPARENT, 20)
-            setOnClickListener {
-                tick(this, filled || firmTick)
-                onClick()
-            }
+            setOnClickListener { onClick() }
+            bounce(this, indicator, firm = filled || firmTick)
         }
     }
 
@@ -474,22 +532,18 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             gravity = Gravity.CENTER
             elevation = dp(8).toFloat()          // same depth as the bar; the bar is added later, so it draws on top
             setPadding(dp(4), dp(6), dp(4), dp(6))
-            addView(
-                ImageView(ctx).apply {
-                    setImageResource(R.drawable.ic_stop)
-                    imageTintList = ColorStateList.valueOf(fg)
-                    importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-                },
-                lp(dp(24), dp(24))
-            )
+            val stopIcon = ImageView(ctx).apply {
+                setImageResource(R.drawable.ic_stop)
+                imageTintList = ColorStateList.valueOf(fg)
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            addView(stopIcon, lp(dp(24), dp(24)))
             addView(tv("Stop", 11f, fg, true), lp(wrapContent, wrapContent).apply { topMargin = dp(2) })
             isClickable = true
             isFocusable = true
             background = ripple(p.accentStrong, 32)
-            setOnClickListener {
-                tick(this, true)
-                onClick()
-            }
+            setOnClickListener { onClick() }
+            bounce(this, stopIcon, 0.8f, true)
         }
     }
 }

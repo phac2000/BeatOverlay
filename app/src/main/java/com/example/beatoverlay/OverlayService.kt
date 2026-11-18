@@ -157,6 +157,7 @@ class OverlayService : Service() {
         c.chaosStartMin = getInt(K_CHAOS_START, c.chaosStartMin)
         c.chaosPct = getInt(K_CHAOS_PCT, c.chaosPct)
         c.chaosGrowPct = getInt(K_CHAOS_GROW, c.chaosGrowPct)
+        c.chaosEnabled = getBool(K_CHAOS_ENABLED, c.chaosEnabled)
 
         c.haptics = getBool(K_HAPTICS, c.haptics)
         c.hapticStrengthPct = getInt(K_H_STRENGTH, c.hapticStrengthPct)

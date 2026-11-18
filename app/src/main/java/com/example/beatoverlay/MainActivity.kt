@@ -375,7 +375,7 @@ class MainActivity : Activity() {
                 then()
             }
             .setNeutralButton("Keep editing", null)
-            .show()
+            .show().also { ui.tickDialog(it) }
     }
 
     /** The Apply item in the bar looks different when changes are waiting, so rebuild the bar when that flips. */
@@ -618,22 +618,32 @@ class MainActivity : Activity() {
     private fun collapsingHeader(title: String, home: Boolean = false) {
         val bigH = (resources.displayMetrics.heightPixels * if (home) 0.5f else 0.3f).toInt()
         val preset = "Preset: " + store.currentPreset
+        val reduced = store.bool(K_REDUCED)
 
+        // ---- big header (scrolls with the page)
         val big = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
-        big.addView(logoView(), ui.lp(dp(112), dp(112)))
-        val t = ui.tv(title, 32f, p.text, true)
-        ui.heading(t)
-        big.addView(t, ui.lp(-2, -2).apply { topMargin = dp(20) })
+        val bigLogo = logoView()
+        big.addView(bigLogo, ui.lp(dp(112), dp(112)))
+        val bigTitle = ui.tv(title, 32f, p.text, true)
+        ui.heading(bigTitle)
+        big.addView(bigTitle, ui.lp(-2, -2).apply { topMargin = dp(20) })
+        val fadeViews = ArrayList<View>()
         if (home) {
-            big.addView(ui.tv("Control and Focus on your beats", 17f, p.sub), ui.lp(-2, -2).apply { topMargin = dp(10) })
-            big.addView(ui.tv(versionLabel(), 14f, p.sub), ui.lp(-2, -2).apply { topMargin = dp(6) })
+            val tagline = ui.tv("Control and Focus on your beats", 17f, p.sub)
+            val ver = ui.tv(versionLabel(), 14f, p.sub)
+            big.addView(tagline, ui.lp(-2, -2).apply { topMargin = dp(10) })
+            big.addView(ver, ui.lp(-2, -2).apply { topMargin = dp(6) })
+            fadeViews.add(tagline)
+            fadeViews.add(ver)
         }
-        big.addView(ui.tv(preset, 14f, p.sub), ui.lp(-2, -2).apply { topMargin = dp(if (home) 12 else 8) })
+        val bigPreset = ui.tv(preset, 14f, p.sub)
+        big.addView(bigPreset, ui.lp(-2, -2).apply { topMargin = dp(if (home) 12 else 8) })
         page.addView(big, ui.lp(-1, bigH))
 
+        // ---- small pinned bar
         val bar = FrameLayout(this).apply {
             setBackgroundColor(p.bg)
             alpha = 0f
@@ -645,20 +655,141 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(20), 0, dp(20), 0)
         }
-        row.addView(logoView(), ui.lp(dp(44), dp(44)))
-        row.addView(ui.tv(title, 22f, p.text, true).apply { setPadding(dp(12), 0, 0, 0) }, ui.lp(0, -2, 1f))
-        row.addView(ui.tv(preset, 13f, p.sub))
+        val smallLogo = logoView()
+        val smallTitle = ui.tv(title, 22f, p.text, true).apply { setPadding(dp(12), 0, 0, 0) }
+        val smallPreset = ui.tv(preset, 13f, p.sub)
+        row.addView(smallLogo, ui.lp(dp(44), dp(44)))
+        row.addView(smallTitle, ui.lp(0, -2, 1f))
+        row.addView(smallPreset)
         bar.addView(row, FrameLayout.LayoutParams(-1, dp(COMPACT_DP), Gravity.BOTTOM))
         rootView.addView(bar, FrameLayout.LayoutParams(-1, insetTop + dp(COMPACT_DP), Gravity.TOP))
         compactBar = bar
 
-        val from = bigH * 0.45f
-        val to = bigH * 0.8f
+        if (reduced) {
+            // Reduce motion: the old simple cross-fade.
+            val from = bigH * 0.45f
+            val to = bigH * 0.8f
+            scroll.setOnScrollChangeListener { _, _, y, _, _ ->
+                val f = ((y - from) / (to - from)).coerceIn(0f, 1f)
+                bar.alpha = f
+                bar.visibility = if (f == 0f) View.INVISIBLE else View.VISIBLE
+                big.alpha = 1f - f
+            }
+            return
+        }
+
+        // ---- flying copies: they move from the big positions to the small ones
+        val flyLogo = logoView().apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        val flyTitle = ui.tv(title, 32f, p.text, true).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        val flyPreset = ui.tv(preset, 14f, p.sub).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
+        val flyers = listOf(flyLogo, flyTitle, flyPreset)
+        flyLogo.layoutParams = FrameLayout.LayoutParams(dp(112), dp(112))
+        for (f in flyers) {
+            if (f.layoutParams == null) f.layoutParams = FrameLayout.LayoutParams(-2, -2)
+            f.pivotX = 0f
+            f.pivotY = 0f
+            f.visibility = View.INVISIBLE
+            rootView.addView(f)
+        }
+        // The small copies stay hidden; the flying ones are drawn in their place.
+        smallLogo.alpha = 0f
+        smallTitle.alpha = 0f
+        smallPreset.alpha = 0f
+
+        val bigViews = listOf<View>(bigLogo, bigTitle, bigPreset)
+        val smallViews = listOf<View>(smallLogo, smallTitle, smallPreset)
+        val smallInsetX = listOf(0, dp(12), 0) // the small title has 12 dp of left padding
+        val scaleTo = listOf(44f / 112f, 22f / 32f, 13f / 14f)
+
+        var e = 0f              // 0 = big, 1 = small (can overshoot a little while bouncing)
+        var collapsed = false
+        var firstEvent = true
+        var anim: ValueAnimator? = null
+        val rootLoc = IntArray(2)
+        val loc = IntArray(2)
+
+        fun place() {
+            rootView.getLocationInWindow(rootLoc)
+            for (i in 0 until 3) {
+                bigViews[i].getLocationInWindow(loc)
+                val bx = (loc[0] - rootLoc[0]).toFloat()
+                val by = (loc[1] - rootLoc[1]).toFloat()
+                smallViews[i].getLocationInWindow(loc)
+                val sx = (loc[0] - rootLoc[0] + smallInsetX[i]).toFloat()
+                val sy = (loc[1] - rootLoc[1]).toFloat()
+                val v = flyers[i]
+                v.translationX = bx + (sx - bx) * e
+                v.translationY = by + (sy - by) * e
+                val s = 1f + (scaleTo[i] - 1f) * e
+                v.scaleX = s
+                v.scaleY = s
+            }
+        }
+
+        fun applyState(animating: Boolean) {
+            val flying = e != 0f || animating
+            for (i in 0 until 3) {
+                flyers[i].visibility = if (flying) View.VISIBLE else View.INVISIBLE
+                bigViews[i].alpha = if (flying) 0f else 1f
+            }
+            val fade = (1f - e).coerceIn(0f, 1f)
+            for (v in fadeViews) v.alpha = fade
+            val barA = e.coerceIn(0f, 1f)
+            bar.alpha = barA
+            bar.visibility = if (barA == 0f) View.INVISIBLE else View.VISIBLE
+            if (flying) place()
+        }
+
+        fun goTo(target: Float, animate: Boolean) {
+            anim?.cancel()
+            if (!animate) {
+                e = target
+                applyState(false)
+                return
+            }
+            val e0 = e
+            anim = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = if (target > e0) 520L else 460L
+                interpolator = OvershootInterpolator(0.5f)
+                var ticked = false
+                addUpdateListener {
+                    e = e0 + (target - e0) * (it.animatedValue as Float)
+                    applyState(true)
+                    if (!ticked && it.currentPlayTime >= 330L) {   // the moment the title first lands
+                        ticked = true
+                        ui.tick(rootView, false)
+                    }
+                }
+                addListener(object : AnimatorListenerAdapter() {
+                    private var cancelled = false
+                    override fun onAnimationCancel(animation: Animator) {
+                        cancelled = true
+                    }
+                    override fun onAnimationEnd(animation: Animator) {
+                        if (cancelled) return
+                        e = target
+                        applyState(false)
+                    }
+                })
+                start()
+            }
+        }
+
+        val collapseAt = bigH * 0.35f
+        val expandAt = bigH * 0.25f
         scroll.setOnScrollChangeListener { _, _, y, _, _ ->
-            val f = ((y - from) / (to - from)).coerceIn(0f, 1f)
-            bar.alpha = f
-            bar.visibility = if (f == 0f) View.INVISIBLE else View.VISIBLE
-            big.alpha = 1f - f
+            val want = if (collapsed) y > expandAt else y > collapseAt
+            if (want != collapsed) {
+                collapsed = want
+                // After a rebuild (for example rotation) at a deep scroll position, jump straight there.
+                goTo(if (want) 1f else 0f, !firstEvent)
+            } else if (e != 0f) {
+                place()
+            }
+            firstEvent = false
+        }
+        bar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (e != 0f) place()
         }
     }
 
@@ -864,7 +995,7 @@ class MainActivity : Activity() {
                 isClickable = true
                 isFocusable = true
                 contentDescription = "Skip setup"
-                setOnClickListener { finishSetup() }
+                setOnClickListener { ui.tick(this, false); finishSetup() }
             },
             ui.lp(-1, -2)
         )
@@ -918,6 +1049,7 @@ class MainActivity : Activity() {
         ui.slider(c, K_REST_GAP_MAX, "Longest gap between", 5, 300, "s")
 
         c = ui.card(page, "Random tempo drift")
+        ui.toggle(c, K_CHAOS_ENABLED, "Enable random tempo drift", gate = true)
         ui.slider(c, K_CHAOS_START, "Starts after", 0, 20, "min", "start")
         ui.slider(c, K_CHAOS_PCT, "Drift amount (±)", 0, 50, "%", "none")
         ui.slider(c, K_CHAOS_GROW, "Drift grows by", 0, 10, "%/min", "none")
@@ -994,7 +1126,7 @@ class MainActivity : Activity() {
                 store.deletePreset(name)
                 render(true)
             }
-            .show()
+            .show().also { ui.tickDialog(it) }
     }
 
     // ---------------------------------------------------------------- Settings
@@ -1028,7 +1160,9 @@ class MainActivity : Activity() {
                 "Turned on automatically if Android's animations are off.")
 
         c = ui.card(page, "Haptic feedback")
-        ui.toggle(c, K_NAV_HAPTICS, "Vibrate on navigation buttons")
+        ui.toggle(c, K_NAV_HAPTICS, "UI haptic feedback")
+        ui.note(c, "A small tick on buttons, switches, choices and slider release. " +
+                "It also follows Android's touch-feedback setting.")
         ui.toggle(c, K_HAPTICS, "Vibrate on every beat", gate = true)
         ui.slider(c, K_H_STRENGTH, "Vibration strength", 5, 100, "%")
         ui.slider(c, K_H_MS, "Vibration length", 10, 300, "ms")
