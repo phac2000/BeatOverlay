@@ -4,6 +4,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ArgbEvaluator
 import android.animation.ValueAnimator
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -39,7 +40,7 @@ class Card(val view: LinearLayout) {
     var target: LinearLayout = view
 }
 
-/** Builds the widgets used by every screen, coloured from the current [Palette]. */
+/** Builds the widgets used by every screen, colored from the current [Palette]. */
 class Ui(private val ctx: Context, val p: Palette, private val store: SettingsStore) {
 
     private val density = ctx.resources.displayMetrics.density
@@ -72,6 +73,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
     fun heading(v: View) = ViewCompat.setAccessibilityHeading(v, true)
 
     /** Press squish plus a tick when the finger lifts inside the view. Squish is skipped with Reduce motion. */
+    @SuppressLint("ClickableViewAccessibility")
     private fun bounce(touch: View, target: View = touch, depth: Float = 0.92f, firm: Boolean = false) {
         fun springBack() {
             if (store.bool(K_REDUCED)) return
@@ -157,11 +159,6 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         })
     }
 
-    /** Rows added after this go back to the card itself instead of the switch-gated area. */
-    fun endGate(card: Card) {
-        card.target = card.view
-    }
-
     private fun setEnabledTree(v: View, on: Boolean) {
         v.isEnabled = on
         if (v is ViewGroup) for (i in 0 until v.childCount) setEnabledTree(v.getChildAt(i), on)
@@ -192,7 +189,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
                 setEnabledTree(body, on)
             }
             applyGate(sw.isChecked)
-            // Rows are added after this point, so grey them out as they arrive when the switch starts off.
+            // Rows are added after this point, so gray them out as they arrive when the switch starts off.
             body.setOnHierarchyChangeListener(object : ViewGroup.OnHierarchyChangeListener {
                 override fun onChildViewAdded(parent: View?, child: View?) {
                     if (child != null && !sw.isChecked) setEnabledTree(child, false)
@@ -347,6 +344,8 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             orientation = LinearLayout.HORIZONTAL
             background = rounded(p.field, 24)
             setPadding(dp(4), dp(4), dp(4), dp(4))
+            clipChildren = false      // the pill may grow a little during its pop without being cut off
+            clipToPadding = false
         }
         options.forEachIndexed { i, option ->
             val on = i == selected
@@ -363,9 +362,9 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
                 bounce(this)
                 if (on && popKey == "$title#$i") {
                     popKey = null
-                    scaleX = 0.8f
-                    scaleY = 0.8f
-                    post { animate().scaleX(1f).scaleY(1f).setDuration(380).setInterpolator(OvershootInterpolator(3.5f)).start() }
+                    scaleX = 0.9f
+                    scaleY = 0.9f
+                    post { animate().scaleX(1f).scaleY(1f).setDuration(320).setInterpolator(OvershootInterpolator(2f)).start() }
                 }
             }
             group.addView(seg, lp(0, wrapContent, 1f))
@@ -422,8 +421,9 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
 
     /**
      * One destination / action in the floating bar: icon on a pill, label underneath.
-     * [filled] gives it the strong accent colour (used for the main Start / Pause / Resume button).
+     * [filled] gives it the strong accent color (used for the main Start / Pause / Resume button).
      */
+    @SuppressLint("RtlHardcoded")
     fun navItem(
         icon: Int, label: String, selected: Boolean, enabled: Boolean,
         filled: Boolean = false, strong: Boolean = false, badge: Boolean = false, firmTick: Boolean = false,
@@ -480,7 +480,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
 
     /**
      * "Applied" animation for an Apply item built with badge = true: the check pops, the dot shrinks
-     * away and the highlight fades to the grey "nothing to apply" look. [onDone] runs at the end.
+     * away and the highlight fades to the gray "nothing to apply" look. [onDone] runs at the end.
      */
     fun playApplied(item: View, onDone: () -> Unit) {
         val group = item as? ViewGroup
@@ -524,7 +524,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
 
     // ------------------------------------------------------------ Stop button
 
-    /** The Stop button beside the floating bar: same corner style, strong colour, icon over label. */
+    /** The Stop button beside the floating bar: same corner style, strong color, icon over label. */
     fun stopButton(onClick: () -> Unit): View {
         val fg = if (p.isDark) p.onAccent else Color.WHITE
         return LinearLayout(ctx).apply {

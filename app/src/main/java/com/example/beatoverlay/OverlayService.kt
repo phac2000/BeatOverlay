@@ -166,6 +166,7 @@ class OverlayService : Service() {
         b.alpha = getInt(K_ALPHA_PCT, (b.alpha * 100).toInt()) / 100f
         b.edgeFadePct = getInt(K_EDGE_FADE, b.edgeFadePct)
         b.reducedMotion = getBool(K_REDUCED, b.reducedMotion)
+        b.showBpm = getBool(K_SHOW_BPM, b.showBpm)
         b.chevronMode = getInt(K_CHEVRON_MODE, b.chevronMode)
         b.markerScalePct = getInt(K_MARKER_SIZE, b.markerScalePct)
         updateMarkerImage(b, getBool(K_USE_IMAGE, false))
