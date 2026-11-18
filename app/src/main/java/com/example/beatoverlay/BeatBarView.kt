@@ -67,6 +67,7 @@ class BeatBarView(context: Context) : View(context) {
         var chaosStartMin: Int = 1,    // randomness starts after this many minutes (0 = from the start)
         var chaosPct: Int = 50,        // starting max +/- tempo jump in percent (0 = off)
         var chaosGrowPct: Int = 10,    // percentage points added to the jump size every minute
+        var chaosEnabled: Boolean = true, // master switch for random tempo drift
     )
 
     var config = Config()
@@ -239,7 +240,7 @@ class BeatBarView(context: Context) : View(context) {
     }
 
     private fun chaosActive() =
-        (config.chaosPct > 0 || config.chaosGrowPct > 0) && minutes() >= config.chaosStartMin
+        config.chaosEnabled && (config.chaosPct > 0 || config.chaosGrowPct > 0) && minutes() >= config.chaosStartMin
 
     /** Current max jump size (fraction). Starts at chaosPct and keeps growing every minute. */
     private fun chaosAmount(): Float {
