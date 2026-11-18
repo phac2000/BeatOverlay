@@ -163,7 +163,7 @@ class BeatBarView(context: Context) : View(context) {
         fadeShader = null
     }
 
-    private val visibleBeats = 2.5f   // beats that fit between the centre line and the right edge
+    private val visibleBeats = 2.5f   // beats that fit between the center line and the right edge
 
     // Timeline state
     private var lastFrame = 0L
@@ -430,7 +430,7 @@ class BeatBarView(context: Context) : View(context) {
         canvas.drawLine(hitX, h * 0.04f, hitX, h * 0.96f, line)
 
         if (reducedMotion) {
-            // No travelling markers: one marker on the centre line flashes on every beat.
+            // No traveling markers: one marker on the center line flashes on every beat.
             val flashMs = minOf(140f, 30000f / maxOf(shownBpm, 1f))
             val sinceBeatMs = frac * 60000f / maxOf(shownBpm, 1f)
             val flash = !frozen && sinceBeatMs < flashMs
@@ -441,7 +441,7 @@ class BeatBarView(context: Context) : View(context) {
                 canvas.drawCircle(hitX, h / 2, h * 0.46f * scale, glow)
             }
         } else {
-            // Start far enough to the left so markers keep scrolling past the centre line
+            // Start far enough to the left so markers keep scrolling past the center line
             var i = -(floor((hitX / travel) * visibleBeats).toInt() + 1)
             while (true) {
                 val beatsAway = i - frac

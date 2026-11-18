@@ -1,5 +1,6 @@
 package com.example.beatoverlay
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
@@ -18,7 +19,7 @@ import kotlin.math.abs
 class OverlayGestures(ctx: Context, private val l: Listener) : View.OnTouchListener {
 
     interface Listener {
-        /** Finger down (true) or lifted / cancelled (false). */
+        /** Finger down (true) or lifted / canceled (false). */
         fun onTouch(down: Boolean) {}
         fun onDragStart() {}
         /** Vertical distance since the finger went down. */
@@ -54,6 +55,7 @@ class OverlayGestures(ctx: Context, private val l: Listener) : View.OnTouchListe
         resolveTaps(n)
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onTouch(v: View, e: MotionEvent): Boolean {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {

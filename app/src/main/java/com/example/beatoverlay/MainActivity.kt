@@ -1,10 +1,12 @@
 package com.example.beatoverlay
 
 import android.Manifest
-import android.app.Activity
 import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
+import android.annotation.SuppressLint
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -14,7 +16,7 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.BitmapFactory
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
+import android.graphics.Outline
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -24,8 +26,10 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.WindowInsets
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
@@ -34,12 +38,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.ViewCompat
 import java.io.File
-import android.animation.ValueAnimator
-import android.graphics.Outline
-import android.view.ViewOutlineProvider
-import android.view.animation.AccelerateInterpolator
+import androidx.core.net.toUri
 
 private const val SCREEN_HOME = 0
 private const val SCREEN_PRESETS = 1
@@ -183,6 +185,7 @@ class MainActivity : Activity() {
         super.onDestroy()
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         when {
             screen == SCREEN_SETUP -> {
@@ -216,9 +219,9 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 29) {
             window.isNavigationBarContrastEnforced = false
         }
-        window.setBackgroundDrawable(ColorDrawable(p.bg))
+        window.setBackgroundDrawable(p.bg.toDrawable())
         val light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-                (if (Build.VERSION.SDK_INT >= 26) View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR else 0)
+                (View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR)
         val layoutFlags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
@@ -227,6 +230,7 @@ class MainActivity : Activity() {
     }
 
     /** Builds the whole screen again (used when the theme or the page changes). */
+    @SuppressLint("RtlHardcoded")
     private fun render(keepScroll: Boolean) {
         val keepY = if (keepScroll && ::scroll.isInitialized) scroll.scrollY else 0
 
@@ -242,7 +246,11 @@ class MainActivity : Activity() {
         }
         rootView = root
         compactBar = null
-        page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        page = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            clipToPadding = false
+            clipChildren = false
+        }
         scroll = ScrollView(this).apply {
             clipToPadding = false
             clipChildren = false
@@ -390,10 +398,8 @@ class MainActivity : Activity() {
         store.applyPending()
         toast(if (overlayRunning) "Applied to the overlay" else "Applied")
         val item = applyItem
-        if (item == null || store.bool(K_REDUCED)) {
-            updateApplyButton()
-        } else {
-            // From here on nothing is waiting. The animation fades the item to its grey look, then the bar is rebuilt.
+        if (item == null || store.bool(K_REDUCED)) updateApplyButton() else {
+            // From here on nothing is waiting. The animation fades the item to its gray look, then the bar is rebuilt.
             // If a setting is edited meanwhile, updateApplyButton() rebuilds the bar straight away.
             applyPending = false
             ui.playApplied(item) { fillNav() }
@@ -489,7 +495,7 @@ class MainActivity : Activity() {
             paused -> "Resume"
             else -> "Pause"
         }
-        val main = ui.navItem(icon, label, false, true, filled = true) { onMainClicked() }
+        val main = ui.navItem(icon, label, false, enabled = true, filled = true) { onMainClicked() }
         main.contentDescription = "$label overlay"
         navBar.addView(main, ui.lp(0, -2, 1f))
         updateStop(true)
@@ -611,7 +617,7 @@ class MainActivity : Activity() {
 
     private fun versionLabel(): String = try {
         "v" + packageManager.getPackageInfo(packageName, 0).versionName
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         ""
     }
 
@@ -697,8 +703,8 @@ class MainActivity : Activity() {
         smallTitle.alpha = 0f
         smallPreset.alpha = 0f
 
-        val bigViews = listOf<View>(bigLogo, bigTitle, bigPreset)
-        val smallViews = listOf<View>(smallLogo, smallTitle, smallPreset)
+        val bigViews = listOf(bigLogo, bigTitle, bigPreset)
+        val smallViews = listOf(smallLogo, smallTitle, smallPreset)
         val smallInsetX = listOf(0, dp(12), 0) // the small title has 12 dp of left padding
         val scaleTo = listOf(44f / 112f, 22f / 32f, 13f / 14f)
 
@@ -854,7 +860,7 @@ class MainActivity : Activity() {
         if (!allowed) {
             c.target.addView(
                 ui.pillButton("Open permission settings", true) {
-                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+                    startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:$packageName".toUri()))
                 },
                 ui.lp(-1, dp(48)).apply { topMargin = dp(8) }
             )
@@ -926,6 +932,7 @@ class MainActivity : Activity() {
         practicePad(c)
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun practicePad(c: Card) {
         val label = ui.tv("Try the gestures here", 16f, p.text, true).apply {
             gravity = Gravity.CENTER
@@ -937,11 +944,13 @@ class MainActivity : Activity() {
         }
         pad.addView(label, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
 
-        // Same recogniser as the real bar, so double tap waits for a third tap only if triple tap has an action.
+        // Same recognizer as the real bar, so double tap waits for a third tap only if triple tap has an action.
         val gestures = OverlayGestures(this, object : OverlayGestures.Listener {
+            @SuppressLint("SetTextI18n")
             override fun onDrag(dy: Float) {
                 label.text = "↕ Drag: moves the bar up or down"
             }
+            @SuppressLint("SetTextI18n")
             override fun onGesture(gesture: Int) {
                 label.text = "${GESTURE_NAMES[gesture]}: ${ACTION_LABELS[store.int(GESTURE_KEYS[gesture])]}"
             }
@@ -1260,7 +1269,7 @@ class MainActivity : Activity() {
                 },
                 REQ_IMAGE
             )
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             toast("No file picker found on this phone")
         }
     }
@@ -1384,7 +1393,7 @@ class MainActivity : Activity() {
         if (!Settings.canDrawOverlays(this)) {
             toast("Allow \"Display over other apps\", then press Start again")
             startActivity(
-                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
+                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, "package:$packageName".toUri())
             )
             return
         }
