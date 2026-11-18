@@ -115,6 +115,7 @@ class MainActivity : Activity() {
             overlayRunning = intent.getBooleanExtra(OverlayService.EXTRA_RUNNING, false)
             overlayPaused = intent.getBooleanExtra(OverlayService.EXTRA_PAUSED, false)
             fillNav()
+            updateSetupOverlayBtn()
         }
     }
 
@@ -124,6 +125,7 @@ class MainActivity : Activity() {
             overlayRunning = false
             overlayPaused = false
             fillNav()
+            updateSetupOverlayBtn()
         }
     }
 
@@ -621,10 +623,10 @@ class MainActivity : Activity() {
         ""
     }
 
-    private fun collapsingHeader(title: String, home: Boolean = false) {
+    private fun collapsingHeader(title: String, home: Boolean = false, showPreset: Boolean = true) {
         val bigH = (resources.displayMetrics.heightPixels * if (home) 0.5f else 0.3f)
             .toInt().coerceAtLeast(if (home) 0 else dp(210))
-        val preset = "Preset: " + store.currentPreset
+        val preset = if (showPreset) "Preset: " + store.currentPreset else ""
         val reduced = store.bool(K_REDUCED)
 
         // ---- big header (scrolls with the page)
@@ -669,6 +671,16 @@ class MainActivity : Activity() {
         row.addView(smallTitle, ui.lp(0, -2, 1f))
         row.addView(smallPreset)
         bar.addView(row, FrameLayout.LayoutParams(-1, dp(COMPACT_DP), Gravity.BOTTOM))
+        // Soft shadow under the pinned bar. It is a child of the bar, so it fades in and out with it.
+        bar.clipChildren = false
+        val shadow = View(this).apply {
+            background = android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                intArrayOf(if (p.isDark) 0x66000000 else 0x33000000, 0x00000000)
+            )
+            translationY = dp(24).toFloat()
+        }
+        bar.addView(shadow, FrameLayout.LayoutParams(-1, dp(24), Gravity.BOTTOM))
         rootView.addView(bar, FrameLayout.LayoutParams(-1, insetTop + dp(COMPACT_DP), Gravity.TOP))
         compactBar = bar
 
@@ -898,16 +910,7 @@ class MainActivity : Activity() {
         ui.slider(c, K_BAR_W, "Width", 40, 100, "%")
         ui.slider(c, K_BAR_H, "Thickness", 24, 72, "dp")
         ui.slider(c, K_BAR_Y_PCT, "Vertical position", 0, 100, "%")
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(16), 0, 0)
-        }
-        row.addView(ui.pillButton("Show overlay", true) { startOverlay() }, ui.lp(0, dp(48), 1f).apply { marginEnd = dp(8) })
-        row.addView(
-            ui.pillButton("Hide overlay", false) { stopService(Intent(this, OverlayService::class.java)) },
-            ui.lp(0, dp(48), 1f)
-        )
-        c.target.addView(row)
+        c.target.addView(overlayToggleButton(), ui.lp(-1, dp(48)).apply { topMargin = dp(16) })
     }
 
     /** Last step: how to move the bar, what each gesture does right now, and a pad to try them on. */
@@ -915,6 +918,7 @@ class MainActivity : Activity() {
         var c = ui.card(page, "Move the bar")
         ui.note(c, "Drag the bar up or down to move it anywhere on the screen. " +
                 "Small ▲▼ arrows at its left end remind you; they fade out a few seconds after the overlay starts.")
+        c.target.addView(overlayToggleButton(), ui.lp(-1, dp(48)).apply { topMargin = dp(12) })
 
         c = ui.card(page, "Gestures")
         GESTURE_KEYS.forEachIndexed { i, key ->
@@ -986,6 +990,7 @@ class MainActivity : Activity() {
             if (last) {
                 finishSetup()
             } else {
+                if (setupSteps()[index] == STEP_SIZE) hideSetupOverlay()
                 setupStep = index + 1
                 render(false)
             }
@@ -1013,9 +1018,31 @@ class MainActivity : Activity() {
 
     private fun finishSetup() {
         currentFocus?.clearFocus()
+        hideSetupOverlay()
         store.setBool(K_SETUP_DONE, true)
         screen = SCREEN_HOME
         render(false)
+    }
+
+    /** Setup only previews the bar; it is hidden again when the preview step or the setup ends. */
+    private fun hideSetupOverlay() {
+        stopService(Intent(this, OverlayService::class.java))
+    }
+
+    private var setupOverlayBtn: android.widget.Button? = null
+
+    /** One button for the setup steps: "Show overlay" when the bar is off, "Hide overlay" while it runs. */
+    private fun overlayToggleButton(): android.widget.Button {
+        val b = ui.pillButton(if (overlayRunning) "Hide overlay" else "Show overlay", true) {
+            if (overlayRunning) hideSetupOverlay() else startOverlay()
+        }
+        setupOverlayBtn = b
+        return b
+    }
+
+    private fun updateSetupOverlayBtn() {
+        if (screen != SCREEN_SETUP) return
+        setupOverlayBtn?.text = if (overlayRunning) "Hide overlay" else "Show overlay"
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -1108,6 +1135,9 @@ class MainActivity : Activity() {
             setPadding(0, dp(10), 0, 0)
         }
         row.addView(ui.tv(name, 16f, p.text), ui.lp(0, -2, 1f))
+        if (name == store.currentPreset) {
+            row.addView(ui.tv("Current", 13f, p.sub, true).apply { setPadding(0, 0, dp(10), 0) }, ui.lp(-2, -2))
+        }
         if (onDelete != null) {
             row.addView(
                 ui.pillButton("Delete", false) { onDelete() }.apply { contentDescription = "Delete preset $name" },
@@ -1118,7 +1148,7 @@ class MainActivity : Activity() {
             ui.pillButton("Apply", true) {
                 store.applyPreset(name)
                 toast("Applied \"$name\"")
-                go(SCREEN_HOME)
+                render(true)    // stay on Presets; refreshes the header name and the "Current" label
             }.apply { contentDescription = "Apply preset $name" },
             ui.lp(-2, dp(40))
         )
@@ -1142,7 +1172,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- Settings
 
     private fun buildSettings() {
-        collapsingHeader("Settings")
+        collapsingHeader("Settings", showPreset = false)
 
         var c = ui.card(page, "Appearance")
         ui.segmented(c, "Theme", listOf("System", "Light", "Dark"), store.int(K_THEME)) {
@@ -1156,6 +1186,8 @@ class MainActivity : Activity() {
         ui.slider(c, K_BAR_W, "Width", 40, 100, "%")
         ui.slider(c, K_BAR_H, "Thickness", 24, 72, "dp")
         ui.slider(c, K_BAR_Y_PCT, "Vertical position", 0, 100, "%")
+        ui.toggle(c, K_SHOW_BPM, "Show BPM number")
+        ui.note(c, "Shows the current tempo at the right end of the bar. PAUSE and the countdown always show.")
         ui.segmented(c, "Up / down arrows (▲▼)", listOf("Fade out", "Always", "Off"), store.int(K_CHEVRON_MODE)) {
             store.setInt(K_CHEVRON_MODE, it)
             render(true)
@@ -1385,6 +1417,8 @@ class MainActivity : Activity() {
         // Home settings that are waiting for Apply are not sent; the overlay gets the last applied values.
         store.values.forEach { (k, v) -> i.putExtra(k, if (k in SettingsStore.PRESET_INTS) store.appliedInt(k) else v) }
         store.flags.forEach { (k, v) -> i.putExtra(k, if (k in SettingsStore.PRESET_BOOLS) store.appliedBool(k) else v) }
+        // Setup only previews the look of the bar, so the beat vibration stays off there (the saved setting is not changed).
+        if (screen == SCREEN_SETUP) i.putExtra(K_HAPTICS, false)
         return i
     }
 
