@@ -43,6 +43,7 @@ const val K_EDGE_FADE = "edgeFade"        // 0 = off, else % of the bar width th
 const val K_THEME = "theme"               // 0 = follow system, 1 = light, 2 = dark
 const val K_REDUCED = "reducedMotion"
 const val K_NAV_HAPTICS = "navHaptics"      // tick when a bottom-bar button is pressed
+const val K_SHOW_BPM = "showBpm"            // show the tempo number on the overlay bar
 
 // Overlay bar layout (app settings)
 const val K_BAR_W = "barW"                // width, % of the screen
