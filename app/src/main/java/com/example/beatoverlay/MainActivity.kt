@@ -498,7 +498,7 @@ class MainActivity : Activity() {
         val main = ui.navItem(icon, label, false, enabled = true, filled = true) { onMainClicked() }
         main.contentDescription = "$label overlay"
         navBar.addView(main, ui.lp(0, -2, 1f))
-        updateStop(true)
+        updateStop()
     }
 
     // ---------------------------------------------------------------- Stop button animation
@@ -530,10 +530,10 @@ class MainActivity : Activity() {
      * up centred. When the overlay stops it plays backwards. A change in the middle of an animation
      * simply continues from where the views are now.
      */
-    private fun updateStop(animate: Boolean) {
+    private fun updateStop() {
         val show = overlayRunning
         if (show == stopShown) return
-        if (!animate || store.bool(K_REDUCED)) {
+        if (store.bool(K_REDUCED)) {
             setStopInstant(show)
             return
         }
