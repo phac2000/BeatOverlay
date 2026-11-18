@@ -221,7 +221,7 @@ class SettingsStore(private val ctx: Context) {
 
     companion object {
         val INT_DEFAULTS: Map<String, Int> = linkedMapOf(
-            K_BPM to 155, K_GROWTH to 10, K_MAX to 300,
+            K_BPM to 67, K_GROWTH to 0, K_MAX to 300,
             K_GAP_MIN to 13, K_GAP_MAX to 21, K_LEN_MIN to 6, K_LEN_MAX to 10, K_COUNTDOWN to 3,
             K_REST_BPM to 74, K_REST_LEN_MIN to 8, K_REST_LEN_MAX to 15, K_REST_SWAP to 20, K_REST_CHANCE to 11,
             K_REST_GAP_MIN to 20, K_REST_GAP_MAX to 40,
@@ -233,8 +233,9 @@ class SettingsStore(private val ctx: Context) {
         )
 
         val BOOL_DEFAULTS: Map<String, Boolean> = linkedMapOf(
-            K_PAUSES to true, K_REST_ENABLED to true, K_REST_RANDOM to true, K_CHAOS_ENABLED to true,
-            K_HAPTICS to true, K_REDUCED to false, K_SETUP_DONE to false, K_USE_IMAGE to false, K_NAV_HAPTICS to true
+            K_PAUSES to false, K_REST_ENABLED to false, K_REST_RANDOM to false, K_CHAOS_ENABLED to false,
+            K_HAPTICS to true, K_REDUCED to false, K_SETUP_DONE to false, K_USE_IMAGE to false, K_NAV_HAPTICS to true,
+            K_SHOW_BPM to false
         )
 
         /** Settings that belong to the app, not to a rhythm preset. */
@@ -243,7 +244,7 @@ class SettingsStore(private val ctx: Context) {
             K_BAR_W, K_BAR_H, K_BAR_Y_PCT, K_CHEVRON_MODE, K_MARKER_SIZE,
             K_G_HOLD, K_G_DOUBLE, K_G_TRIPLE, K_G_SWIPE_L, K_G_SWIPE_R
         )
-        private val APP_BOOLS = setOf(K_HAPTICS, K_REDUCED, K_SETUP_DONE, K_USE_IMAGE, K_NAV_HAPTICS)
+        private val APP_BOOLS = setOf(K_HAPTICS, K_REDUCED, K_SETUP_DONE, K_USE_IMAGE, K_NAV_HAPTICS, K_SHOW_BPM)
 
         val PRESET_INTS: Set<String> = INT_DEFAULTS.keys - APP_INTS
         val PRESET_BOOLS: Set<String> = BOOL_DEFAULTS.keys - APP_BOOLS
@@ -263,6 +264,7 @@ class SettingsStore(private val ctx: Context) {
             ),
             "Chaos" to mapOf(
                 K_BPM to 155, K_GROWTH to 12, K_MAX to 300,
+                K_PAUSES to true, K_REST_ENABLED to true, K_REST_RANDOM to true, K_CHAOS_ENABLED to true,
                 K_GAP_MIN to 8, K_GAP_MAX to 15, K_LEN_MIN to 3, K_LEN_MAX to 8,
                 K_REST_SWAP to 40, K_REST_CHANCE to 25, K_REST_GAP_MIN to 12, K_REST_GAP_MAX to 25,
                 K_CHAOS_START to 0, K_CHAOS_PCT to 50, K_CHAOS_GROW to 10
