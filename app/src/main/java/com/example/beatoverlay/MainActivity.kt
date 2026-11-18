@@ -616,7 +616,8 @@ class MainActivity : Activity() {
     }
 
     private fun collapsingHeader(title: String, home: Boolean = false) {
-        val bigH = (resources.displayMetrics.heightPixels * if (home) 0.5f else 0.3f).toInt()
+        val bigH = (resources.displayMetrics.heightPixels * if (home) 0.5f else 0.3f)
+            .toInt().coerceAtLeast(if (home) 0 else dp(210))
         val preset = "Preset: " + store.currentPreset
         val reduced = store.bool(K_REDUCED)
 
