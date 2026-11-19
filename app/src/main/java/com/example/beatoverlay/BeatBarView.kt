@@ -57,6 +57,8 @@ class BeatBarView(context: Context) : View(context) {
         var restEnabled: Boolean = false,
         var restChancePct: Int = 11,   // chance a rest follows a pause
         var restSwapPct: Int = 20,     // chance a scheduled pause turns into a rest instead
+        var restSwapOn: Boolean = false,    // "pause becomes a rest" switch
+        var restChanceOn: Boolean = false,  // "rest after a pause" switch
         var restBpm: Int = 74,
         var restLenMinSec: Int = 8,    // rest length
         var restLenMaxSec: Int = 15,
@@ -279,7 +281,7 @@ class BeatBarView(context: Context) : View(context) {
                     untilPauseMs = between(config.gapMinSec, config.gapMaxSec) * 1000L
                     countdownRemainingMs = config.countdownSec * 1000L
                     lastCountdownDigit = -1
-                    if (config.restEnabled && Random.nextInt(100) < config.restChancePct) startRest()
+                    if (config.restEnabled && config.restChanceOn && Random.nextInt(100) < config.restChancePct) startRest()
                 }
             } else if (countdownRemainingMs > 0) {
                 countdownRemainingMs = (countdownRemainingMs - dt).coerceAtLeast(0)
@@ -293,7 +295,7 @@ class BeatBarView(context: Context) : View(context) {
                 untilPauseMs -= dt
                 if (untilPauseMs <= 0) {
                     untilPauseMs = -1
-                    if (config.restEnabled && Random.nextInt(100) < config.restSwapPct) {
+                    if (config.restEnabled && config.restSwapOn && Random.nextInt(100) < config.restSwapPct) {
                         startRest()                      // this "pause" becomes a slow rest
                     } else {
                         pauseRemainingMs = between(config.lenMinSec, config.lenMaxSec) * 1000L
