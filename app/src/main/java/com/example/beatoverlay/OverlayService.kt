@@ -150,6 +150,8 @@ class OverlayService : Service() {
         c.restLenMaxSec = getInt(K_REST_LEN_MAX, c.restLenMaxSec)
         c.restSwapPct = getInt(K_REST_SWAP, c.restSwapPct)
         c.restChancePct = getInt(K_REST_CHANCE, c.restChancePct)
+        c.restSwapOn = getBool(K_REST_SWAP_ON, c.restSwapOn)
+        c.restChanceOn = getBool(K_REST_CHANCE_ON, c.restChanceOn)
         c.restRandom = getBool(K_REST_RANDOM, c.restRandom)
         c.restGapMinSec = getInt(K_REST_GAP_MIN, c.restGapMinSec)
         c.restGapMaxSec = getInt(K_REST_GAP_MAX, c.restGapMaxSec)
