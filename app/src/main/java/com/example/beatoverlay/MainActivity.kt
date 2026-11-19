@@ -1061,7 +1061,7 @@ class MainActivity : Activity() {
         var c = ui.card(page, "Tempo")
         ui.slider(c, K_BPM, "Starting BPM", 30, 240, "bpm")
         ui.slider(c, K_GROWTH, "Speed up per minute", 0, 40, "%", "none")
-        ui.slider(c, K_MAX, "Max BPM", 60, 300, "bpm")
+        ui.slider(c, K_MAX, "Max BPM", 60, 400, "bpm")
 
         c = ui.card(page, "Random pauses")
         ui.toggle(c, K_PAUSES, "Enable pauses", gate = true)
