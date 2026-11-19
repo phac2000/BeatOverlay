@@ -30,7 +30,7 @@ data class Palette(
             accent = c("#FF9E9B"), accentStrong = c("#D9534F"), onAccent = c("#3D1412"),
             tonal = c("#F6DCDA"), onTonal = c("#3D1412"),
             field = c("#EFE8E7"), track = c("#CFC6C5"),
-            thumbOn = c("#FFFFFF"), thumbOff = c("#8D8383"),
+            thumbOn = c("#FF9E9B"), thumbOff = c("#8D8383"),
             navBg = c("#FFFFFF"), navIndicator = c("#FFD3D0")
         )
 
@@ -40,7 +40,7 @@ data class Palette(
             accent = c("#FF9E9B"), accentStrong = c("#FF9E9B"), onAccent = c("#3D1412"),
             tonal = c("#5A3A39"), onTonal = c("#F7DAD8"),
             field = c("#403534"), track = c("#5E5150"),
-            thumbOn = c("#3D1412"), thumbOff = c("#B8AAA8"),
+            thumbOn = c("#FF9E9B"), thumbOff = c("#B8AAA8"),
             navBg = c("#3A2F2E"), navIndicator = c("#6B403E")
         )
     }
