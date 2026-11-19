@@ -159,9 +159,30 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         })
     }
 
+    /** Closes the innermost switch-gated area: rows added after this go to the area around it (or the card). */
+    fun endGate(card: Card) {
+        if (card.target === card.view) return
+        card.target = (card.target.parent as? LinearLayout) ?: card.view
+    }
+
+    /** True when [v] and every switch-gated area around it are switched on. */
+    private fun gatesOpen(v: View?): Boolean {
+        var cur = v
+        while (cur != null) {
+            val g = cur.tag as? Switch
+            if (g != null && !g.isChecked) return false
+            cur = cur.parent as? View
+        }
+        return true
+    }
+
     private fun setEnabledTree(v: View, on: Boolean) {
         v.isEnabled = on
-        if (v is ViewGroup) for (i in 0 until v.childCount) setEnabledTree(v.getChildAt(i), on)
+        if (v is ViewGroup) for (i in 0 until v.childCount) {
+            val c = v.getChildAt(i)
+            val own = c.tag as? Switch      // a gated area inside this one stays locked while its own switch is off
+            setEnabledTree(c, if (own != null) on && own.isChecked else on)
+        }
     }
 
     /** On/off switch. With gate = true, the rows added after it are greyed out while it is off. */
@@ -181,18 +202,18 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         card.target.addView(sw, lp(matchParent, wrapContent))
 
         if (gate) {
-            val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
-            card.view.addView(body)
+            val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; tag = sw }
+            card.target.addView(body)       // inside the area around it when gates are nested
             card.target = body
             fun applyGate(on: Boolean) {
                 body.alpha = if (on) 1f else 0.38f
-                setEnabledTree(body, on)
+                setEnabledTree(body, on && gatesOpen(body.parent as? View))
             }
             applyGate(sw.isChecked)
             // Rows are added after this point, so gray them out as they arrive when the switch starts off.
             body.setOnHierarchyChangeListener(object : ViewGroup.OnHierarchyChangeListener {
                 override fun onChildViewAdded(parent: View?, child: View?) {
-                    if (child != null && !sw.isChecked) setEnabledTree(child, false)
+                    if (child != null && !gatesOpen(body)) setEnabledTree(child, false)
                 }
                 override fun onChildViewRemoved(parent: View?, child: View?) {}
             })
