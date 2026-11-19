@@ -23,6 +23,9 @@ const val K_REST_LEN_MAX = "restLenMax"
 const val K_REST_SWAP = "restSwap"
 const val K_REST_CHANCE = "restChance"
 
+const val K_REST_SWAP_ON = "restSwapOn"       // switch for "pause becomes a rest"
+const val K_REST_CHANCE_ON = "restChanceOn"   // switch for "rest after a pause"
+
 // Random rests
 const val K_REST_RANDOM = "restRandom"
 const val K_REST_GAP_MIN = "restGapMin"
