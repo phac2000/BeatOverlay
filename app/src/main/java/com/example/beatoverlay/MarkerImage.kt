@@ -6,6 +6,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.RectF
 import android.net.Uri
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
 import com.caverock.androidsvg.SVG
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -74,12 +76,10 @@ object MarkerImage {
         val side = max(raw.width, raw.height)
         if (side <= MAX_SIDE) return raw
         val s = MAX_SIDE.toFloat() / side
-        return Bitmap.createScaledBitmap(
-            raw, max(1, (raw.width * s).roundToInt()), max(1, (raw.height * s).roundToInt()), true
-        )
+        return raw.scale(max(1, (raw.width * s).roundToInt()), max(1, (raw.height * s).roundToInt()))
     }
 
-    private fun renderSvg(bytes: ByteArray): Bitmap? {
+    private fun renderSvg(bytes: ByteArray): Bitmap {
         val svg = SVG.getFromInputStream(ByteArrayInputStream(bytes))
         val picture = svg.renderToPicture()
         val pw = if (picture.width > 0) picture.width else MAX_SIDE
@@ -87,7 +87,7 @@ object MarkerImage {
         val s = MAX_SIDE.toFloat() / max(pw, ph)
         val bw = max(1, (pw * s).roundToInt())
         val bh = max(1, (ph * s).roundToInt())
-        val bmp = Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+        val bmp = createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
         Canvas(bmp).drawPicture(picture, RectF(0f, 0f, bw.toFloat(), bh.toFloat()))
         return bmp
     }

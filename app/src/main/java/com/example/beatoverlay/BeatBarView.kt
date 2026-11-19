@@ -155,7 +155,6 @@ class BeatBarView(context: Context) : View(context) {
         chevronHeld = down
         if (!down) pokeChevrons(1500)
     }
-
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         pokeChevrons()

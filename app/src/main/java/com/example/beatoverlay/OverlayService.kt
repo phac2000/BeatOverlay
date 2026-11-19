@@ -24,6 +24,9 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import java.io.File
 import kotlin.math.roundToInt
+import android.annotation.SuppressLint
+
+private const val HIDE_MS = 10_000L
 
 /**
  * The highest refresh rate the screen offers at its current resolution (for example 120f).
@@ -104,6 +107,7 @@ class OverlayService : Service() {
         return START_STICKY
     }
 
+    @SuppressLint("ClickableViewAccessibility")
     private fun createBar() {
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val store = SettingsStore(this)
@@ -216,21 +220,16 @@ class OverlayService : Service() {
     }
 
     /** The position saved by the last drag, or null if there is none. */
-    private fun readSavedY(): Int? = try {
+    private fun readSavedY(): Int? = runCatching {
         File(filesDir, POS_FILE).readText().trim().toIntOrNull()?.coerceIn(0, 100)
-    } catch (e: Exception) {
-        null
-    }
+    }.getOrNull()
 
     /** Remembers where the bar was dropped, in a small file the app reads when it opens. */
     private fun savePosition() {
         val m = maxY()
         barYPct = if (m == 0) 0 else (params.y * 100f / m).roundToInt().coerceIn(0, 100)
-        try {
-            File(filesDir, POS_FILE).writeText(barYPct.toString())
-        } catch (e: Exception) {
-            // Not saved: the bar simply opens at its old position next time.
-        }
+        // If this fails, the bar simply opens at its old position next time.
+        runCatching { File(filesDir, POS_FILE).writeText(barYPct.toString()) }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -283,7 +282,7 @@ class OverlayService : Service() {
                 Toast.makeText(this, "Turn on Slow rest in the app first", Toast.LENGTH_SHORT).show()
             }
             ACT_RESET -> bar?.resetTempo()
-            ACT_HIDE -> hideFor(10_000L)
+            ACT_HIDE -> hideBriefly()
         }
     }
 
@@ -296,10 +295,10 @@ class OverlayService : Service() {
     }
 
     /** Hides the bar (touches pass through to the app below); the rhythm keeps going underneath. */
-    private fun hideFor(ms: Long) {
+    private fun hideBriefly() {
         setHidden(true)
         handler.removeCallbacks(unhide)
-        handler.postDelayed(unhide, ms)
+        handler.postDelayed(unhide, HIDE_MS)
     }
 
     private fun setHidden(hide: Boolean) {

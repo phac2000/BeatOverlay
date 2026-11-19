@@ -1,8 +1,8 @@
 package com.example.beatoverlay
 
-import android.graphics.Color
+import androidx.core.graphics.toColorInt
 
-/** All colours used by the app. Light and dark versions; the screen is rebuilt when the theme changes. */
+/** All colors used by the app. Light and dark versions; the screen is rebuilt when the theme changes. */
 data class Palette(
     val isDark: Boolean,
     val bg: Int,
@@ -22,7 +22,7 @@ data class Palette(
     val navIndicator: Int
 ) {
     companion object {
-        private fun c(s: String) = Color.parseColor(s)
+        private fun c(s: String) = s.toColorInt()
 
         val LIGHT = Palette(
             isDark = false,

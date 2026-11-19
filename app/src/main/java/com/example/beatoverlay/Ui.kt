@@ -159,7 +159,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         })
     }
 
-    /** Closes the innermost switch-gated area: rows added after this go to the area around it (or the card). */
+    /** Closes the innermost switch-gated area: rows added after this go to the surrounding area (or the card). */
     fun endGate(card: Card) {
         if (card.target === card.view) return
         card.target = (card.target.parent as? LinearLayout) ?: card.view

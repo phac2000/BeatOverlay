@@ -2,8 +2,10 @@ package com.example.beatoverlay
 
 import android.content.Context
 import android.provider.Settings
+import androidx.core.content.edit
 import org.json.JSONObject
 import java.io.File
+
 
 /**
  * Every setting lives here and is saved the moment it changes.
@@ -25,7 +27,7 @@ class SettingsStore(private val ctx: Context) {
 
     private fun systemReducedMotion(): Boolean = try {
         Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         false
     }
 
@@ -48,7 +50,7 @@ class SettingsStore(private val ctx: Context) {
     fun syncPosition(): Boolean {
         val fromFile = try {
             posFile.readText().trim().toIntOrNull()?.coerceIn(0, 100)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             null
         }
         val v = fromFile ?: prefs.getInt(K_BAR_Y_PCT, INT_DEFAULTS.getValue(K_BAR_Y_PCT))
@@ -62,11 +64,11 @@ class SettingsStore(private val ctx: Context) {
 
     private fun putInt(k: String, v: Int) {
         values[k] = v
-        prefs.edit().putInt(k, v).apply()
+        prefs.edit { putInt(k, v) }
         if (k == K_BAR_Y_PCT) {
             try {
                 posFile.writeText(v.toString())     // keeps the file and the setting the same
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 // The setting is still saved; only the shared copy is missed.
             }
         }
@@ -74,7 +76,7 @@ class SettingsStore(private val ctx: Context) {
 
     private fun putBool(k: String, v: Boolean) {
         flags[k] = v
-        prefs.edit().putBoolean(k, v).apply()
+        prefs.edit { putBoolean(k, v) }
     }
 
     /**
@@ -120,10 +122,10 @@ class SettingsStore(private val ctx: Context) {
 
     /** Saves the staged values and tells a running overlay about them. */
     fun applyPending() {
-        val e = prefs.edit()
-        PRESET_INTS.forEach { e.putInt(it, int(it)) }
-        PRESET_BOOLS.forEach { e.putBoolean(it, bool(it)) }
-        e.apply()
+        prefs.edit {
+            PRESET_INTS.forEach { putInt(it, int(it)) }
+            PRESET_BOOLS.forEach { putBoolean(it, bool(it)) }
+        }
         onChange?.invoke()
     }
 
@@ -137,7 +139,7 @@ class SettingsStore(private val ctx: Context) {
 
     private fun savedPresets(): JSONObject = try {
         JSONObject(prefs.getString("presets", "{}") ?: "{}")
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         JSONObject()
     }
 
@@ -148,7 +150,7 @@ class SettingsStore(private val ctx: Context) {
     var currentPreset: String
         get() = prefs.getString("current_preset", "Default") ?: "Default"
         private set(v) {
-            prefs.edit().putString("current_preset", v).apply()
+            prefs.edit { putString("current_preset", v) }
         }
 
     fun builtInPresets(): List<String> = BUILT_IN.keys.toList()
@@ -162,14 +164,14 @@ class SettingsStore(private val ctx: Context) {
         val all = savedPresets()
         all.remove(name)   // so re-saving an existing name moves it to the top
         all.put(name, o)
-        prefs.edit().putString("presets", all.toString()).apply()
+        prefs.edit { putString("presets", all.toString()) }
         currentPreset = name
     }
 
     fun deletePreset(name: String) {
         val all = savedPresets()
         all.remove(name)
-        prefs.edit().putString("presets", all.toString()).apply()
+        prefs.edit { putString("presets", all.toString()) }
     }
 
     /** Applies a preset. Anything the preset does not mention goes back to its default. */
@@ -219,11 +221,11 @@ class SettingsStore(private val ctx: Context) {
             root.optJSONObject("presets")?.let { imported ->
                 val all = savedPresets()
                 imported.keys().forEach { name -> all.remove(name); all.put(name, imported.get(name)) }
-                prefs.edit().putString("presets", all.toString()).apply()
+                prefs.edit { putString("presets", all.toString()) }
             }
             onChange?.invoke()
             return null
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return "Could not read that file."
         }
     }
@@ -260,7 +262,7 @@ class SettingsStore(private val ctx: Context) {
         val PRESET_BOOLS: Set<String> = BOOL_DEFAULTS.keys - APP_BOOLS
 
         val BUILT_IN: Map<String, Map<String, Any>> = linkedMapOf(
-            "Default" to emptyMap<String, Any>(),
+            "Default" to emptyMap(),
             "Warm-up" to mapOf(
                 K_BPM to 100, K_GROWTH to 5, K_MAX to 180,
                 K_PAUSES to false, K_REST_ENABLED to false, K_CHAOS_ENABLED to false,
