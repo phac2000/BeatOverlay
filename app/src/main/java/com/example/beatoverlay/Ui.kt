@@ -34,6 +34,7 @@ import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import androidx.core.view.ViewCompat
+import androidx.core.graphics.withClip
 
 /** A rounded card. New rows go to [target], which is the card itself or a switch-gated area inside it. */
 class Card(val view: LinearLayout) {
@@ -57,6 +58,13 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         cornerRadius = dp(radiusDp).toFloat()
     }
 
+    /** Number box with a soft inner shadow that follows the rounded corners. */
+    fun insetField(color: Int, radiusDp: Int): android.graphics.drawable.Drawable =
+        InnerShadowDrawable(
+            color, dp(radiusDp).toFloat(),
+            Color.argb(if (p.isDark) 80 else 20, 0, 0, 0),
+            dp(5).toFloat()      // how far the shadow reaches inward
+        )
     fun ripple(color: Int, radiusDp: Int) = RippleDrawable(
         ColorStateList.valueOf(Color.argb(60, 128, 128, 128)),
         rounded(color, radiusDp),
@@ -144,6 +152,8 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             background = rounded(p.card, 28)
             elevation = if (p.isDark) 0f else dp(2).toFloat()
             setPadding(dp(18), dp(18), dp(18), dp(20))
+            clipChildren = false      // NEW: let a button grow past the padding during its spring-back
+            clipToPadding = false     // NEW
         }
         val t = tv(title, 22f, p.text, true).apply { gravity = Gravity.CENTER }
         heading(t)
@@ -203,6 +213,8 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
 
         if (gate) {
             val body = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; tag = sw }
+            body.clipChildren = false
+            body.clipToPadding = false
             card.target.addView(body)       // inside the area around it when gates are nested
             card.target = body
             fun applyGate(on: Boolean) {
@@ -254,7 +266,7 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             gravity = Gravity.CENTER
             textSize = 16f
             setTextColor(p.text)
-            background = rounded(p.field, 10)
+            background = insetField(p.field, 10)
             setPadding(dp(4), dp(8), dp(4), dp(8))
             minimumHeight = dp(40)
             contentDescription = title
@@ -407,6 +419,13 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
         setTextColor(if (filled) p.onAccent else p.onTonal)
         background = ripple(if (filled) p.accent else p.tonal, 28)
         setOnClickListener { onClick() }
+        addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {   // NEW
+            override fun onViewAttachedToWindow(v: View) {                           // NEW
+                (v.parent as? ViewGroup)?.let { it.clipChildren = false; it.clipToPadding = false }  // NEW
+            }                                                                        // NEW
+            override fun onViewDetachedFromWindow(v: View) {}                        // NEW
+        })                                                                           // NEW
+        bounce(this)
         bounce(this)
     }
 
@@ -567,4 +586,58 @@ class Ui(private val ctx: Context, val p: Palette, private val store: SettingsSt
             bounce(this, stopIcon, 0.8f, true)
         }
     }
+}
+/** Rounded box with a soft inner shadow on the top and sides only (no shadow along the bottom). */
+private class InnerShadowDrawable(
+    fill: Int,
+    private val radius: Float,
+    private val shade: Int,
+    private val reach: Float
+) : android.graphics.drawable.Drawable() {
+
+    private val rect = android.graphics.RectF()
+    private val tmp = android.graphics.RectF()
+    private val clip = android.graphics.Path()
+    private val base = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = fill }
+    private val ring = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        style = android.graphics.Paint.Style.STROKE
+    }
+    private val steps = 8
+
+    override fun onBoundsChange(b: android.graphics.Rect) {
+        rect.set(b)
+        clip.reset()
+        clip.addRoundRect(rect, radius, radius, android.graphics.Path.Direction.CW)
+    }
+
+    override fun draw(canvas: android.graphics.Canvas) {
+        canvas.drawRoundRect(rect, radius, radius, base)
+        val step = maxOf(reach / steps, 1f)
+        val maxAlpha = Color.alpha(shade)
+        val rgb = shade and 0x00FFFFFF
+        ring.strokeWidth = step
+        val pushDown = radius + reach          // moves the bottom edge of the rings out of the box
+        canvas.withClip(clip) {
+            for (i in 0 until steps) {
+                val t = (i + 0.5f) / steps
+                val a = (maxAlpha * (1f - t) * (1f - t)).toInt()
+                ring.color = (a shl 24) or rgb
+                val inset = step * i + step / 2f
+                tmp.set(
+                    rect.left + inset,
+                    rect.top + inset,
+                    rect.right - inset,
+                    rect.bottom - inset + pushDown
+                )
+                if (tmp.width() <= 0f) break
+                val r = (radius - inset).coerceAtLeast(0f)
+                drawRoundRect(tmp, r, r, ring)
+            }
+        }
+    }
+
+    override fun setAlpha(alpha: Int) {}
+    override fun setColorFilter(cf: android.graphics.ColorFilter?) {}
+    @Suppress("OVERRIDE_DEPRECATION")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }
