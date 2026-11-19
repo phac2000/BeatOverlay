@@ -179,6 +179,12 @@ class SettingsStore(private val ctx: Context) {
             ?: return false
         PRESET_INTS.forEach { k -> putInt(k, (src[k] as? Number)?.toInt() ?: INT_DEFAULTS.getValue(k)) }
         PRESET_BOOLS.forEach { k -> putBool(k, (src[k] as? Boolean) ?: BOOL_DEFAULTS.getValue(k)) }
+        // Presets from before these switches existed: a chance above 0 means the switch is on.
+        fun derived(on: String, pct: String) {
+            if (!src.containsKey(on)) putBool(on, ((src[pct] as? Number)?.toInt() ?: 0) > 0)
+        }
+        derived(K_REST_SWAP_ON, K_REST_SWAP)
+        derived(K_REST_CHANCE_ON, K_REST_CHANCE)
         currentPreset = name
         onChange?.invoke()
         return true
@@ -206,6 +212,9 @@ class SettingsStore(private val ctx: Context) {
             root.optJSONObject("settings")?.let { s ->
                 INT_DEFAULTS.keys.forEach { k -> (s.opt(k) as? Number)?.let { putInt(k, it.toInt()) } }
                 BOOL_DEFAULTS.keys.forEach { k -> (s.opt(k) as? Boolean)?.let { putBool(k, it) } }
+                // Backups from before these switches existed: a chance above 0 means the switch is on.
+                if (!s.has(K_REST_SWAP_ON)) putBool(K_REST_SWAP_ON, s.optInt(K_REST_SWAP, 0) > 0)
+                if (!s.has(K_REST_CHANCE_ON)) putBool(K_REST_CHANCE_ON, s.optInt(K_REST_CHANCE, 0) > 0)
             }
             root.optJSONObject("presets")?.let { imported ->
                 val all = savedPresets()
@@ -235,7 +244,8 @@ class SettingsStore(private val ctx: Context) {
         val BOOL_DEFAULTS: Map<String, Boolean> = linkedMapOf(
             K_PAUSES to false, K_REST_ENABLED to false, K_REST_RANDOM to false, K_CHAOS_ENABLED to false,
             K_HAPTICS to true, K_REDUCED to false, K_SETUP_DONE to false, K_USE_IMAGE to false, K_NAV_HAPTICS to true,
-            K_SHOW_BPM to false
+            K_SHOW_BPM to false,
+            K_REST_SWAP_ON to false, K_REST_CHANCE_ON to false
         )
 
         /** Settings that belong to the app, not to a rhythm preset. */
