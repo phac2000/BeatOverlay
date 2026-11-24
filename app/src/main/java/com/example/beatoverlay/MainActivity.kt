@@ -47,6 +47,7 @@ private const val SCREEN_HOME = 0
 private const val SCREEN_PRESETS = 1
 private const val SCREEN_SETTINGS = 2
 private const val SCREEN_SETUP = 3
+private const val SCREEN_THEME = 4
 private const val COMPACT_DP = 72
 
 // First-time setup steps (the notification step is skipped before Android 13)
@@ -198,6 +199,7 @@ class MainActivity : Activity() {
                     super.onBackPressed()
                 }
             }
+            screen == SCREEN_THEME -> go(SCREEN_SETTINGS)
             screen != SCREEN_HOME -> go(SCREEN_HOME)
             store.hasPending() -> confirmLeaveHome { finish() }
             else -> super.onBackPressed()
@@ -206,13 +208,14 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- frame
 
-    private fun currentPalette(): Palette = when (store.int(K_THEME)) {
-        1 -> Palette.LIGHT
-        2 -> Palette.DARK
-        else -> {
-            val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-            if (night == Configuration.UI_MODE_NIGHT_YES) Palette.DARK else Palette.LIGHT
+    private fun currentPalette(): Palette {
+        val dark = when (store.int(K_THEME)) {
+            1 -> false
+            2 -> true
+            else -> (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                    Configuration.UI_MODE_NIGHT_YES
         }
+        return Palette.of(this, store.int(K_COLOR), dark)
     }
 
     private fun applySystemBars() {
@@ -256,6 +259,7 @@ class MainActivity : Activity() {
         scroll = ScrollView(this).apply {
             clipToPadding = false
             clipChildren = false
+            isVerticalScrollBarEnabled = false
             isFocusable = true
             isFocusableInTouchMode = true
             addView(page)
@@ -307,6 +311,7 @@ class MainActivity : Activity() {
             SCREEN_HOME -> buildHome()
             SCREEN_PRESETS -> buildPresets()
             SCREEN_SETUP -> buildSetup()
+            SCREEN_THEME -> buildTheme()
             else -> buildSettings()
         }
         fillNav()
@@ -432,7 +437,7 @@ class MainActivity : Activity() {
             ui.lp(0, -2, 1f)
         )
         navBar.addView(
-            ui.navItem(R.drawable.ic_settings, "Settings", screen == SCREEN_SETTINGS, true) { go(SCREEN_SETTINGS) },
+            ui.navItem(R.drawable.ic_settings, "Settings", screen == SCREEN_SETTINGS || screen == SCREEN_THEME, true) { go(SCREEN_SETTINGS) },
             ui.lp(0, -2, 1f)
         )
         // Apply (Home only): grows in when Home opens, shrinks away when Home is left.
@@ -1175,11 +1180,14 @@ class MainActivity : Activity() {
     private fun buildSettings() {
         collapsingHeader("Settings", showPreset = false)
 
-        var c = ui.card(page, "Appearance")
-        ui.segmented(c, "Theme", listOf("System", "Light", "Dark"), store.int(K_THEME)) {
-            store.setInt(K_THEME, it)
-            render(true)
-        }
+        var c = ui.card(page, "Theme")
+        ui.note(c, themeSummary())
+        c.target.addView(
+            ui.pillButton("Change theme", false) { go(SCREEN_THEME) },
+            ui.lp(-1, dp(48)).apply { topMargin = dp(8) }
+        )
+
+        c = ui.card(page, "Appearance")
         ui.slider(c, K_ALPHA_PCT, "Bar opacity", 10, 100, "%")
         ui.slider(c, K_EDGE_FADE, "Edge fade", 0, 50, "%", "off")
 
@@ -1233,6 +1241,89 @@ class MainActivity : Activity() {
         row.addView(ui.pillButton("Export", true) { exportSettings() }, ui.lp(0, dp(48), 1f).apply { marginEnd = dp(8) })
         row.addView(ui.pillButton("Import", false) { importSettings() }, ui.lp(0, dp(48), 1f))
         c.target.addView(row)
+    }
+
+    private fun themeSummary(): String {
+        val color = store.int(K_COLOR).let {
+            if (it in Palette.COLOR_NAMES.indices && (it != Palette.WALLPAPER || Palette.wallpaperAvailable())) it else 0
+        }
+        val mode = listOf("System", "Light", "Dark")[store.int(K_THEME).coerceIn(0, 2)]
+        return "${Palette.COLOR_NAMES[color]} color · $mode mode"
+    }
+
+    private fun buildTheme() {
+        collapsingHeader("Theme", showPreset = false)
+
+        var c = ui.card(page, "Mode")
+        ui.segmented(c, "Light or dark", listOf("System", "Light", "Dark"), store.int(K_THEME)) {
+            store.setInt(K_THEME, it)
+            render(true)
+        }
+
+        c = ui.card(page, "Color")
+        val choices = (0..7).toMutableList()
+        if (Palette.wallpaperAvailable()) choices.add(Palette.WALLPAPER)
+        val selected = store.int(K_COLOR).let { if (it in choices) it else 0 }
+        choices.chunked(3).forEach { rowItems ->
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(0, dp(4), 0, 0)
+            }
+            for (i in 0 until 3) {
+                val item = rowItems.getOrNull(i)
+                val cell = if (item != null) colorSwatch(item, item == selected) else View(this)
+                row.addView(cell, ui.lp(0, -2, 1f).apply { marginStart = dp(4); marginEnd = dp(4) })
+            }
+            c.target.addView(row, ui.lp(-1, -2))
+        }
+        if (Palette.wallpaperAvailable()) {
+            ui.note(c, "Wallpaper uses the colors Android picks from your wallpaper.")
+        }
+
+        page.addView(
+            ui.pillButton("Back to Settings", false) { go(SCREEN_SETTINGS) },
+            ui.lp(-1, dp(48)).apply { topMargin = dp(12) }
+        )
+    }
+
+    /** One color choice: a small preview tile in that theme's own colors, with its name below. */
+    private fun colorSwatch(index: Int, selected: Boolean): View {
+        val pal = Palette.of(this, index, p.isDark)
+        val name = Palette.COLOR_NAMES[index]
+        val tile = FrameLayout(this).apply {
+            background = ui.rounded(pal.bg, 16)
+        }
+        val dot = FrameLayout(this).apply { background = ui.rounded(pal.accent, 14) }
+        if (selected) {
+            dot.addView(
+                ui.tv("✓", 16f, pal.onAccent, true).apply { gravity = Gravity.CENTER },
+                FrameLayout.LayoutParams(-1, -1)
+            )
+        }
+        tile.addView(dot, FrameLayout.LayoutParams(dp(28), dp(28), Gravity.CENTER))
+
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(0, dp(4), 0, dp(4))
+            isClickable = true
+            isFocusable = true
+            contentDescription = name
+            ViewCompat.setStateDescription(this, if (selected) "Selected" else "Not selected")
+            setOnClickListener {
+                ui.tick(this)
+                if (!selected) {
+                    store.setInt(K_COLOR, index)
+                    render(true)
+                }
+            }
+        }
+        box.addView(tile, ui.lp(-1, dp(56)))
+        box.addView(
+            ui.tv(name, 13f, p.text, selected).apply { gravity = Gravity.CENTER },
+            ui.lp(-2, -2).apply { topMargin = dp(6) }
+        )
+        return box
     }
 
     // ---------------------------------------------------------------- Beat marker picture

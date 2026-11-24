@@ -237,7 +237,7 @@ class SettingsStore(private val ctx: Context) {
             K_REST_BPM to 74, K_REST_LEN_MIN to 8, K_REST_LEN_MAX to 15, K_REST_SWAP to 20, K_REST_CHANCE to 11,
             K_REST_GAP_MIN to 20, K_REST_GAP_MAX to 40,
             K_CHAOS_START to 1, K_CHAOS_PCT to 50, K_CHAOS_GROW to 10,
-            K_H_STRENGTH to 100, K_H_MS to 35, K_ALPHA_PCT to 80, K_EDGE_FADE to 20, K_THEME to 0,
+            K_H_STRENGTH to 100, K_H_MS to 35, K_ALPHA_PCT to 80, K_EDGE_FADE to 20, K_THEME to 0, K_COLOR to 0,
             K_BAR_W to 90, K_BAR_H to 36, K_BAR_Y_PCT to 8, K_CHEVRON_MODE to 0, K_MARKER_SIZE to 100,
             K_G_HOLD to ACT_OPEN, K_G_DOUBLE to ACT_PAUSE, K_G_TRIPLE to ACT_NONE,
             K_G_SWIPE_L to ACT_NONE, K_G_SWIPE_R to ACT_NONE
@@ -252,7 +252,7 @@ class SettingsStore(private val ctx: Context) {
 
         /** Settings that belong to the app, not to a rhythm preset. */
         private val APP_INTS = setOf(
-            K_H_STRENGTH, K_H_MS, K_ALPHA_PCT, K_EDGE_FADE, K_THEME,
+            K_H_STRENGTH, K_H_MS, K_ALPHA_PCT, K_EDGE_FADE, K_THEME, K_COLOR,
             K_BAR_W, K_BAR_H, K_BAR_Y_PCT, K_CHEVRON_MODE, K_MARKER_SIZE,
             K_G_HOLD, K_G_DOUBLE, K_G_TRIPLE, K_G_SWIPE_L, K_G_SWIPE_R
         )

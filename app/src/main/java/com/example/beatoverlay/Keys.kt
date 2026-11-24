@@ -44,6 +44,7 @@ const val K_H_MS = "hMs"
 const val K_ALPHA_PCT = "alphaPct"
 const val K_EDGE_FADE = "edgeFade"        // 0 = off, else % of the bar width that fades out at each end
 const val K_THEME = "theme"               // 0 = follow system, 1 = light, 2 = dark
+const val K_COLOR = "colorTheme"          // 0 Rose, 1 Ocean, 2 Forest, 3 Violet, 4 Amber, 5 Mono, 6 Dracula, 7 Catppuccin, 8 Wallpaper (Android 12+)
 const val K_REDUCED = "reducedMotion"
 const val K_NAV_HAPTICS = "navHaptics"      // tick when a bottom-bar button is pressed
 const val K_SHOW_BPM = "showBpm"            // show the tempo number on the overlay bar
