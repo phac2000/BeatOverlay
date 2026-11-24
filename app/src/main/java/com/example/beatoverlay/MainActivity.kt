@@ -42,6 +42,7 @@ import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.ViewCompat
 import java.io.File
 import androidx.core.net.toUri
+import android.widget.TextView
 
 private const val SCREEN_HOME = 0
 private const val SCREEN_PRESETS = 1
@@ -94,6 +95,9 @@ class MainActivity : Activity() {
     private var applyAnim: ValueAnimator? = null
     private lateinit var rootView: FrameLayout
     private var compactBar: View? = null
+    private var presetLabels: List<TextView> = emptyList()      // header texts that show the preset name
+    private var onPresetChanged: (() -> Unit)? = null           // re-places the flying header copy
+    private val currentTags = ArrayList<Pair<String, TextView>>() // the "Current" label of each preset row
     private var switching = false
     private lateinit var stopBtn: View
     private var stopShown = false              // what the Stop button currently shows
@@ -396,9 +400,8 @@ class MainActivity : Activity() {
     /** The Apply item in the bar looks different when changes are waiting, so rebuild the bar when that flips. */
     private fun updateApplyButton() {
         if (store.hasPending() == applyPending) return
-        fillNav()
+        refreshApplyItem()
     }
-
     private fun onApplyClicked() {
         currentFocus?.clearFocus()   // commits a number that is still being typed
         if (!store.hasPending()) return
@@ -406,13 +409,34 @@ class MainActivity : Activity() {
         toast(if (overlayRunning) "Applied to the overlay" else "Applied")
         val item = applyItem
         if (item == null || store.bool(K_REDUCED)) updateApplyButton() else {
-            // From here on nothing is waiting. The animation fades the item to its gray look, then the bar is rebuilt.
-            // If a setting is edited meanwhile, updateApplyButton() rebuilds the bar straight away.
+            // then the Apply item is swapped
             applyPending = false
-            ui.playApplied(item) { fillNav() }
+            ui.playApplied(item) { refreshApplyItem() }
         }
     }
-
+    /**
+     * Swaps only the Apply item to match what is waiting now, so Home, Presets, Settings and Start
+     * are not touched. Falls back to a full rebuild when the item is not in its normal place
+     * (not on Home, or its grow/shrink animation is running).
+     */
+    private fun refreshApplyItem() {
+        val old = applyItem
+        val idx = if (old == null) -1 else navBar.indexOfChild(old)
+        if (screen != SCREEN_HOME || old == null || idx < 0 || applyAnim != null) {
+            fillNav()
+            return
+        }
+        applyPending = store.hasPending()
+        val apply = ui.navItem(
+            R.drawable.ic_check, "Apply", false, applyPending,
+            strong = applyPending, badge = applyPending, firmTick = true
+        ) { onApplyClicked() }
+        apply.contentDescription = if (applyPending) "Apply changes" else "Apply changes, nothing to apply"
+        ViewCompat.setStateDescription(apply, if (applyPending) "Changes waiting" else "Nothing to apply")
+        navBar.removeViewAt(idx)
+        navBar.addView(apply, idx, ui.lp(0, -2, 1f))
+        applyItem = apply
+    }
     // ---------------------------------------------------------------- floating bar
 
     /**
@@ -629,6 +653,7 @@ class MainActivity : Activity() {
     }
 
     private fun collapsingHeader(title: String, home: Boolean = false, showPreset: Boolean = true) {
+        onPresetChanged = null
         val bigH = (resources.displayMetrics.heightPixels * if (home) 0.5f else 0.3f)
             .toInt().coerceAtLeast(if (home) 0 else dp(210))
         val preset = if (showPreset) "Preset: " + store.currentPreset else ""
@@ -672,6 +697,7 @@ class MainActivity : Activity() {
         val smallLogo = logoView()
         val smallTitle = ui.tv(title, 22f, p.text, true).apply { setPadding(dp(12), 0, 0, 0) }
         val smallPreset = ui.tv(preset, 13f, p.sub)
+        presetLabels = listOf(bigPreset, smallPreset)
         row.addView(smallLogo, ui.lp(dp(44), dp(44)))
         row.addView(smallTitle, ui.lp(0, -2, 1f))
         row.addView(smallPreset)
@@ -707,6 +733,7 @@ class MainActivity : Activity() {
         val flyTitle = ui.tv(title, 32f, p.text, true).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
         val flyPreset = ui.tv(preset, 14f, p.sub).apply { importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }
         val flyers = listOf(flyLogo, flyTitle, flyPreset)
+        presetLabels = listOf(bigPreset, smallPreset, flyPreset)
         flyLogo.layoutParams = FrameLayout.LayoutParams(dp(112), dp(112))
         for (f in flyers) {
             if (f.layoutParams == null) f.layoutParams = FrameLayout.LayoutParams(-2, -2)
@@ -749,6 +776,7 @@ class MainActivity : Activity() {
                 v.scaleY = s
             }
         }
+        onPresetChanged = { rootView.post { if (e != 0f) place() } }
 
         fun applyState(animating: Boolean) {
             val flying = e != 0f || animating
@@ -1101,6 +1129,7 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- Presets
 
     private fun buildPresets() {
+        currentTags.clear()
         collapsingHeader("Presets")
 
         val save = ui.card(page, "Save current settings")
@@ -1141,9 +1170,12 @@ class MainActivity : Activity() {
             setPadding(0, dp(10), 0, 0)
         }
         row.addView(ui.tv(name, 16f, p.text), ui.lp(0, -2, 1f))
-        if (name == store.currentPreset) {
-            row.addView(ui.tv("Current", 13f, p.sub, true).apply { setPadding(0, 0, dp(10), 0) }, ui.lp(-2, -2))
+        val tag = ui.tv("Current", 13f, p.sub, true).apply {
+            setPadding(0, 0, dp(10), 0)
+            visibility = if (name == store.currentPreset) View.VISIBLE else View.GONE
         }
+        currentTags.add(name to tag)
+        row.addView(tag, ui.lp(-2, -2))
         if (onDelete != null) {
             row.addView(
                 ui.pillButton("Delete", false) { onDelete() }.apply { contentDescription = "Delete preset $name" },
@@ -1154,13 +1186,20 @@ class MainActivity : Activity() {
             ui.pillButton("Apply", true) {
                 store.applyPreset(name)
                 toast("Applied \"$name\"")
-                render(true)    // stay on Presets; refreshes the header name and the "Current" label
+                refreshPresetLabels()    // stay on Presets; no rebuild
             }.apply { contentDescription = "Apply preset $name" },
             ui.lp(-2, dp(40))
         )
         c.target.addView(row)
     }
-
+    /** Updates the preset name in the header and the "Current" labels without rebuilding the screen. */
+    private fun refreshPresetLabels() {
+        val current = store.currentPreset
+        val text = "Preset: $current"
+        presetLabels.forEach { it.text = text }
+        currentTags.forEach { (n, tag) -> tag.visibility = if (n == current) View.VISIBLE else View.GONE }
+        onPresetChanged?.invoke()
+    }
     private fun confirmDelete(name: String) {
         val style = if (p.isDark) android.R.style.Theme_DeviceDefault_Dialog_Alert
         else android.R.style.Theme_DeviceDefault_Light_Dialog_Alert

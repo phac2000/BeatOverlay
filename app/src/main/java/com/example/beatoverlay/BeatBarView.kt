@@ -77,7 +77,9 @@ class BeatBarView(context: Context) : View(context) {
     /** Left and right ends fade to transparent. Percent of the bar width per side; 0 = off. */
     var edgeFadePct = 20
         set(value) {
-            field = value.coerceIn(0, 50)
+            val v = value.coerceIn(0, 50)
+            if (v == field) return      // same value: keep the fade as it is
+            field = v
             fadeShader = null
             invalidate()
         }

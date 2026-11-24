@@ -25,6 +25,7 @@ import androidx.core.content.ContextCompat
 import java.io.File
 import kotlin.math.roundToInt
 import android.annotation.SuppressLint
+import java.util.concurrent.Executors
 
 private const val HIDE_MS = 10_000L
 
@@ -53,6 +54,7 @@ class OverlayService : Service() {
     private lateinit var gestures: OverlayGestures
 
     private val handler = Handler(Looper.getMainLooper())
+    private val notification: Notification by lazy { buildNotification() }
 
     // Shown to the app through broadcasts (the overlay runs in its own process).
     private var running = false
@@ -76,6 +78,8 @@ class OverlayService : Service() {
 
     private var dragging = false
     private var imageStamp = -1L
+    private var decodingStamp = -1L
+    private val imageExecutor = Executors.newSingleThreadExecutor()
     private val unhide = Runnable { setHidden(false) }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -90,7 +94,7 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(1, buildNotification())
+        startForeground(1, notification)
         running = true
 
         if (bar == null) createBar()
@@ -180,28 +184,46 @@ class OverlayService : Service() {
         GESTURE_KEYS.forEachIndexed { i, key -> actions[i] = getInt(key, actions[i]) }
 
         if (!dragging) {
+            val oldW = params.width
+            val oldH = params.height
+            val oldY = params.y
             barW = getInt(K_BAR_W, barW)
             barH = getInt(K_BAR_H, barH)
             barYPct = getInt(K_BAR_Y_PCT, barYPct)
             computeLayout()
-            wm.updateViewLayout(b, params)
+            // Only touch the window when the size or position really changed.
+            if (params.width != oldW || params.height != oldH || params.y != oldY) {
+                wm.updateViewLayout(b, params)
+            }
         }
     }
 
-    /** Loads the chosen picture (only when the file changed) or goes back to circles. */
+    /** Loads the chosen picture in the background (only when the file changed) or goes back to circles. */
     private fun updateMarkerImage(b: BeatBarView, use: Boolean) {
         val f = File(filesDir, MARKER_FILE)
         if (!use || !f.exists()) {
-            b.markerBitmap = null
+            if (b.markerBitmap != null) b.markerBitmap = null
             imageStamp = -1L
+            decodingStamp = -1L
             return
         }
         val stamp = f.lastModified() xor f.length()
         if (stamp == imageStamp && b.markerBitmap != null) return
-        imageStamp = stamp
-        b.markerBitmap = BitmapFactory.decodeFile(f.path)
+        if (stamp == decodingStamp) return          // already loading this one
+        decodingStamp = stamp
+        val path = f.path
+        imageExecutor.execute {
+            val bmp = BitmapFactory.decodeFile(path)
+            handler.post {
+                // Ignore the result if the picture changed again, it was switched off, or the bar is gone.
+                if (decodingStamp == stamp && bar === b) {
+                    imageStamp = stamp
+                    decodingStamp = -1L
+                    b.markerBitmap = bmp
+                }
+            }
+        }
     }
-
     // ------------------------------------------------------------ layout and position
 
     private fun computeLayout() {
@@ -344,11 +366,13 @@ class OverlayService : Service() {
                     PendingIntent.FLAG_IMMUTABLE
                 )
             )
+            .setOnlyAlertOnce(true)
             .build()
     }
 
     override fun onDestroy() {
         handler.removeCallbacksAndMessages(null)
+        imageExecutor.shutdown()
         if (::gestures.isInitialized) gestures.cancel()
         bar?.let { wm.removeView(it) }
         bar = null
